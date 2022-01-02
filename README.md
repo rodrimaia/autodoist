@@ -150,3 +150,14 @@ In addition, if you experience issues with syncing you can increase the api sync
 For all arguments, please check out the help:
 
     python autodoist.py --help
+
+
+## Docker container
+
+To build the docker container, check out the repository and run:
+
+    docker build . --tag autodoist:latest
+
+To run autodoist inside the docker container:
+
+    docker run -it autodoist:latest
