@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-from todoist.api import TodoistAPI
+from todoist_api_python.api import TodoistAPI
 import sys
 import time
 import requests
@@ -73,15 +73,15 @@ def query_yes_no(question, default="yes"):
 
 # Check if label exists, if not, create it
 
-
-def verify_label_existance(args, api, label_name, prompt_mode):
+def verify_label_existance(api, label_name, prompt_mode):
     # Check the regeneration label exists
-    label = api.labels.all(lambda x: x['name'] == label_name)
+    labels = api.get_labels()
+    label = [x for x in labels if x.name == label_name]
 
     if len(label) > 0:
-        label_id = label[0]['id']
+        label_id = label[0].id
         logging.debug('Label \'%s\' found as label id %d',
-                      args.label, label_id)
+                      label_name, label_id)
     else:
         # Create a new label in Todoist
         logging.info(
@@ -94,11 +94,15 @@ def verify_label_existance(args, api, label_name, prompt_mode):
             response = True
 
         if response:
-            api.labels.add(label_name)
-            api.commit()
-            api.sync()
-            label = api.labels.all(lambda x: x['name'] == label_name)
-            label_id = label[0]['id']
+            try:
+                api.add_label(name=label_name)
+            except Exception as error:
+                print(error)
+
+            labels = api.get_labels()
+            label = [x for x in labels if x.name == label_name]
+            label_id = label[0].id
+
             logging.info("Label '{}' has been created!".format(label_name))
         else:
             logging.info('Exiting Autodoist.')
@@ -152,31 +156,33 @@ def initialise(args):
     logging.debug('Connecting to the Todoist API')
 
     api_arguments = {'token': args.api_key}
+    
     if args.nocache:
         logging.debug('Disabling local caching')
         api_arguments['cache'] = None
 
     api = TodoistAPI(**api_arguments)
-    sync(api)
+
+    logging.info("Autodoist has connected and is running fine!\n")
+
+    # Check if labels exist
 
     # If labeling argument is used
     if args.label is not None:
 
         # Verify that the next action label exists; ask user if it needs to be created
-        label_id = verify_label_existance(args, api, args.label, 1)
+        label_id = verify_label_existance(api, args.label, 1)
 
     else:
         # Label functionality not needed
         label_id = None
-
-    logging.info("Autodoist has connected and is running fine!\n")
 
     # If regeneration mode is used, verify labels
     if args.regeneration is not None:
 
         # Verify the existance of the regeneraton labels; force creation of label
         regen_labels_id = [verify_label_existance(
-            args, api, regen_label, 2) for regen_label in args.regen_label_names]
+            api, regen_label, 2) for regen_label in args.regen_label_names]
 
     else:
         # Label functionality not needed
@@ -567,7 +573,12 @@ def autodoist_magic(args, api, label_id, regen_labels_id):
     overview_item_ids = {}
     overview_item_labels = {}
 
-    for project in api.projects.all():
+    try:
+        projects = api.get_projects()
+    except Exception as error:
+        print(error)
+
+    for project in projects:
 
         # To determine if a sequential task was found
         first_found_project = False
@@ -584,16 +595,24 @@ def autodoist_magic(args, api, label_id, regen_labels_id):
                             project['name'], project_type)
 
         # Get all items for the project
-        project_items = api.items.all(
-            lambda x: x['project_id'] == project['id'])
+        try:
+            project_tasks = api.get_tasks(project_id = project.id)
+        except Exception as error:
+            print(error)
 
         # Run for both none-sectioned and sectioned items
-        for s in [0, 1]:
+
+        # Get completed tasks: get(api._session, endpoint, api._token, '0')['items']
+
+        # for s in [0, 1]: # TEMP SECTION ONLY
+        for s in [1]:
             if s == 0:
-                sections = [create_none_section()]
+                sections = [create_none_section()] # TODO: Rewrite
             elif s == 1:
-                sections = api.sections.all(
-                    lambda x: x['project_id'] == project['id'])
+                try:
+                    sections = api.get_sections(project_id = project.id)
+                except Exception as error:
+                    print(error)
 
             for section in sections:
 
@@ -611,13 +630,13 @@ def autodoist_magic(args, api, label_id, regen_labels_id):
                                 section['name'], section_type)
 
                 # Get all items for the section
-                items = [x for x in project_items if x['section_id']
-                         == section['id']]
+                tasks = [x for x in project_tasks if x.section_id
+                         == section.id]
 
-                # Change top parents_id in order to sort later on
-                for item in items:
-                    if not item['parent_id']:
-                        item['parent_id'] = 0
+                # Change top parents_id in order to numerically sort later on
+                for task in tasks:
+                    if not task.parent_id:
+                        task.parent_id = 0
 
                 # Sort by parent_id and filter for completable items
                 items = sorted(items, key=lambda x: (
@@ -963,7 +982,7 @@ def main():
     # Start main loop
     while True:
         start_time = time.time()
-        sync(api)
+        # sync(api)
 
         # Evaluate projects, sections, and items
         overview_item_ids, overview_item_labels = autodoist_magic(
