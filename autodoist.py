@@ -45,10 +45,15 @@ def close_connection(connection):
 # Execute any SQLite query passed to it in the form of string
 
 
-def execute_query(connection, query):
+def execute_query(connection, query, *args):
     cursor = connection.cursor()
     try:
+        value = args[0]
+        cursor.execute(query,(value,)) # Useful to pass None/NULL value correctly
+    except:
         cursor.execute(query)
+
+    try:
         connection.commit()
         logging.debug("Query executed: {}".format(query))
     except Exception as e:
@@ -111,21 +116,14 @@ def db_update_value(connection, model, column, value):
             db_name = 'projects'
             goal = 'project_id'
 
-        query = """
-        UPDATE
-            %s
-        SET
-            %s = %r
-        WHERE
-            %s = %r
-        """ % (db_name, column, value, goal, model.id)
+        query = """UPDATE %s SET %s = ? WHERE %s = %r""" % (db_name, column, goal, model.id)
 
-        result = execute_query(connection, query)
+        result = execute_query(connection, query, value)
+
+        return result
 
     except Exception as e:
         logging.debug(f"The error '{e}' occurred")
-
-    return result
 
 
 # Check if the id of a model exists, if not, add to database
@@ -159,10 +157,10 @@ def db_check_existance(connection, model):
             if isinstance(model, Section):
                 q_create = """
                 INSERT INTO
-                sections (section_id, project_type, section_type)
+                sections (section_id, section_type)
                 VALUES
-                (%r, %s, %s);
-                """ % (model.id, 'NULL', 'NULL')
+                (%r, %s);
+                """ % (model.id, 'NULL')
 
             if isinstance(model, Project):
                 q_create = """
@@ -198,8 +196,7 @@ def initialise_sqlite():
     q_create_sections_table = """
     CREATE TABLE IF NOT EXISTS sections (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    sections_id INTEGER,
-    project_type TEXT,
+    section_id INTEGER,
     section_type
     );
     """
@@ -571,8 +568,6 @@ def add_label(connection, task, dominant_type, label, overview_task_ids, overvie
             overview_task_ids[task.id] = 1
         overview_task_labels[task.id] = labels
 
-        db_update_value(connection, task, 'task_type', dominant_type)
-
 # Logic to track removal of a label from a task
 
 
@@ -851,6 +846,14 @@ def autodoist_magic(args, api, connection):
         except Exception as error:
             print(error)
 
+        # If a project type has changed, clean all tasks in this project for good measure
+        if next_action_label is not None:
+            if project_type_changed == 1:
+                for task in project_tasks:
+                    remove_label(task, next_action_label, overview_task_ids, overview_task_labels)
+                    db_update_value(connection, task, 'task_type', None)
+                    db_update_value(connection, task, 'parent_type', None)
+
         # Run for both non-sectioned and sectioned tasks
 
         # Get completed tasks:
@@ -890,46 +893,39 @@ def autodoist_magic(args, api, connection):
                 args, connection, section)
 
             # Get all tasks for the section
-            tasks = [x for x in project_tasks if x.section_id
+            section_tasks = [x for x in project_tasks if x.section_id
                      == section.id]
 
             # Change top tasks parents_id from 'None' to '0' in order to numerically sort later on
-            for task in tasks:
+            for task in section_tasks:
                 if not task.parent_id:
                     task.parent_id = 0
 
             # Sort by parent_id and child order
             # In the past, Todoist used to screw up the tasks orders, so originally I processed parentless tasks first such that children could properly inherit porperties.
             # With the new API this seems to be in order, but I'm keeping this just in case for now. TODO: Could be used for optimization in the future.
-            tasks = sorted(tasks, key=lambda x: (
+            section_tasks = sorted(section_tasks, key=lambda x: (
                 int(x.parent_id), x.order))
 
             # If a type has changed, clean all tasks in this section for good measure
             if next_action_label is not None:
-                if project_type_changed == 1 or section_type_changed == 1:
-                    # Remove labels
-                    [remove_label(task, next_action_label, overview_task_ids,
-                                  overview_task_labels) for task in tasks]
-                    # Remove parent types
-                    # for task in tasks:
-                    #     task.parent_type = None #TODO: METADATA
+                if section_type_changed == 1:
+                    for task in section_tasks:
+                        remove_label(task, next_action_label, overview_task_ids, overview_task_labels)
+                        db_update_value(connection, task, 'task_type', None)
+                        db_update_value(connection, task, 'parent_type', None)
 
             # For all tasks in this section
-            for task in tasks:
+            for task in section_tasks:
                 dominant_type = None  # Reset
 
                 db_check_existance(connection, task)
 
-                # Possible nottes routine for the future
-                # notes = api.notes.all() TODO: Quick notes test to see what the impact is?
-                # note_content = [x['content'] for x in notes if x['item_id'] == item['id']]
-                # print(note_content)
-
                 # Determine which child_tasks exist, both all and the ones that have not been checked yet
                 non_completed_tasks = list(
-                    filter(lambda x: not x.is_completed, tasks))
+                    filter(lambda x: not x.is_completed, section_tasks))
                 child_tasks_all = list(
-                    filter(lambda x: x.parent_id == task.id, tasks))
+                    filter(lambda x: x.parent_id == task.id, section_tasks))
                 child_tasks = list(
                     filter(lambda x: x.parent_id == task.id, non_completed_tasks))
 
@@ -971,13 +967,21 @@ def autodoist_magic(args, api, connection):
                     task_type, task_type_changed = get_task_type(
                         args, connection, task)
 
+                    # If task type has changed, clean all of its children for good measure
+                    if next_action_label is not None:
+                        if task_type_changed == 1:
+                            for child_task in child_tasks:
+                                remove_label(child_task, next_action_label, overview_task_ids, overview_task_labels)
+                                db_update_value(connection, child_task, 'task_type', None)
+                                db_update_value(connection, child_task, 'parent_type', None)
+
                     # Determine hierarchy types for logic
                     hierarchy_types = [task_type,
                                        section_type, project_type]
                     hierarchy_boolean = [type(x) != type(None)
                                          for x in hierarchy_types]
 
-                    # If it is a parentless task
+                    # If it is a parentless task, set task type based on hierarchy
                     if task.parent_id == 0:
                         if hierarchy_boolean[0]:
                             # Inherit task type
@@ -1011,6 +1015,9 @@ def autodoist_magic(args, api, connection):
                             elif project_type == 'parallel' or project_type == 'p-s':
                                 add_label(
                                     connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                        else:
+                            # Parentless task has no type, so skip any children.
+                            continue
 
                         # Mark other conditions too
                         if first_found_section == False and hierarchy_boolean[1]:
@@ -1018,17 +1025,16 @@ def autodoist_magic(args, api, connection):
                         if first_found_project is False and hierarchy_boolean[2]:
                             first_found_project = True
 
-                    # If there are children
+                    # If a parentless or sub-task which has children
                     if len(child_tasks) > 0:
 
-                        #TODO: is this still needed?
                         # # Check if task state has changed, if so clean children for good measure 
                         # if task_type_changed == 1:
                         #     [remove_label(child_task, next_action_label, overview_task_ids, overview_task_labels)
                         #         for child_task in child_tasks]
 
-                        #If a sub-task, inherit parent task type
-                        if task.parent_id != 0:
+                        #If it is a sub-task with no own type, inherit the parent task type instead
+                        if task.parent_id != 0 and task_type == None:
                             # dominant_type = task.parent_type  # TODO: METADATA
                             dominant_type = db_read_value(
                                 connection, task, 'parent_type')[0][0]
@@ -1058,7 +1064,7 @@ def autodoist_magic(args, api, connection):
                         elif dominant_type == 'parallel' or (dominant_type == 's-p' and next_action_label in task.labels):
                             remove_label(
                                 task, next_action_label, overview_task_ids, overview_task_labels)
-                            db_update_value(connection, task, 'task_type', None) #TODO: integrate in remove_label funcionality, else a lot of duplicates. #TODO: None not registered, fix bug.
+                            # db_update_value(connection, task, 'task_type', None) #TODO: integrate in remove_label funcionality, else a lot of duplicates.
 
                             for child_task in child_tasks:
 
@@ -1077,94 +1083,94 @@ def autodoist_magic(args, api, connection):
                     # Remove labels based on start / due dates
 
                     # If task is too far in the future, remove the next_action tag and skip #TODO: FIX THIS
-                    try:
-                        if args.hide_future > 0 and 'due' in task.data and task.due is not None:
-                            due_date = datetime.strptime(
-                                task.due['date'][:10], "%Y-%m-%d")
-                            future_diff = (
-                                due_date - datetime.today()).days
-                            if future_diff >= args.hide_future:
-                                remove_label(
-                                    task, next_action_label, overview_task_ids, overview_task_labels)
-                                continue
-                    except:
-                        # Hide-future not set, skip
-                        continue
+                    # try:
+                    #     if args.hide_future > 0 and 'due' in task.data and task.due is not None:
+                    #         due_date = datetime.strptime(
+                    #             task.due['date'][:10], "%Y-%m-%d")
+                    #         future_diff = (
+                    #             due_date - datetime.today()).days
+                    #         if future_diff >= args.hide_future:
+                    #             remove_label(
+                    #                 task, next_action_label, overview_task_ids, overview_task_labels)
+                    #             continue
+                    # except:
+                    #     # Hide-future not set, skip
+                    #     continue
 
-                    # If start-date has not passed yet, remove label
-                    try:
-                        f1 = task.content.find('start=')
-                        f2 = task.content.find('start=due-')
-                        if f1 > -1 and f2 == -1:
-                            f_end = task.content[f1+6:].find(' ')
-                            if f_end > -1:
-                                start_date = task.content[f1 +
-                                                          6:f1+6+f_end]
-                            else:
-                                start_date = task.content[f1+6:]
+                    # If start-date has not passed yet, remove label #TODO: FIX THIS
+                    # try:
+                    #     f1 = task.content.find('start=')
+                    #     f2 = task.content.find('start=due-')
+                    #     if f1 > -1 and f2 == -1:
+                    #         f_end = task.content[f1+6:].find(' ')
+                    #         if f_end > -1:
+                    #             start_date = task.content[f1 +
+                    #                                       6:f1+6+f_end]
+                    #         else:
+                    #             start_date = task.content[f1+6:]
 
-                            # If start-date hasen't passed, remove all labels
-                            start_date = datetime.strptime(
-                                start_date, args.dateformat)
-                            future_diff = (
-                                datetime.today()-start_date).days
-                            if future_diff < 0:
-                                remove_label(
-                                    task, next_action_label, overview_task_ids, overview_task_labels)
-                                [remove_label(child_task, next_action_label, overview_task_ids,
-                                              overview_task_labels) for child_task in child_tasks]
-                                continue
+                    #         # If start-date hasen't passed, remove all labels
+                    #         start_date = datetime.strptime(
+                    #             start_date, args.dateformat)
+                    #         future_diff = (
+                    #             datetime.today()-start_date).days
+                    #         if future_diff < 0:
+                    #             remove_label(
+                    #                 task, next_action_label, overview_task_ids, overview_task_labels)
+                    #             [remove_label(child_task, next_action_label, overview_task_ids,
+                    #                           overview_task_labels) for child_task in child_tasks]
+                    #             continue
 
-                    except:
-                        logging.warning(
-                            'Wrong start-date format for task: "%s". Please use "start=<DD-MM-YYYY>"', task.content)
-                        continue
+                    # except:
+                    #     logging.warning(
+                    #         'Wrong start-date format for task: "%s". Please use "start=<DD-MM-YYYY>"', task.content)
+                    #     continue
 
-                    # Recurring task friendly - remove label with relative change from due date #TODO Fix this logic
-                    try:
-                        f = task.content.find('start=due-')
-                        if f > -1:
-                            f1a = task.content.find(
-                                'd')  # Find 'd' from 'due'
-                            f1b = task.content.rfind(
-                                'd')  # Find 'd' from days
-                            f2 = task.content.find('w')
-                            f_end = task.content[f+10:].find(' ')
+                    # Recurring task friendly - remove label with relative change from due date #TODO FIX THIS
+                    # try:
+                    #     f = task.content.find('start=due-')
+                    #     if f > -1:
+                    #         f1a = task.content.find(
+                    #             'd')  # Find 'd' from 'due'
+                    #         f1b = task.content.rfind(
+                    #             'd')  # Find 'd' from days
+                    #         f2 = task.content.find('w')
+                    #         f_end = task.content[f+10:].find(' ')
 
-                            if f_end > -1:
-                                offset = task.content[f+10:f+10+f_end-1]
-                            else:
-                                offset = task.content[f+10:-1]
+                    #         if f_end > -1:
+                    #             offset = task.content[f+10:f+10+f_end-1]
+                    #         else:
+                    #             offset = task.content[f+10:-1]
 
-                            try:
-                                task_due_date = task.due['date'][:10]
-                                task_due_date = datetime.strptime(
-                                    task_due_date, '%Y-%m-%d')
-                            except:
-                                logging.warning(
-                                    'No due date to determine start date for task: "%s".', task.content)
-                                continue
+                    #         try:
+                    #             task_due_date = task.due['date'][:10]
+                    #             task_due_date = datetime.strptime(
+                    #                 task_due_date, '%Y-%m-%d')
+                    #         except:
+                    #             logging.warning(
+                    #                 'No due date to determine start date for task: "%s".', task.content)
+                    #             continue
 
-                            if f1a != f1b and f1b > -1:  # To make sure it doesn't trigger if 'w' is chosen
-                                td = timedelta(days=int(offset))
-                            elif f2 > -1:
-                                td = timedelta(weeks=int(offset))
+                    #         if f1a != f1b and f1b > -1:  # To make sure it doesn't trigger if 'w' is chosen
+                    #             td = timedelta(days=int(offset))
+                    #         elif f2 > -1:
+                    #             td = timedelta(weeks=int(offset))
 
-                            # If we're not in the offset from the due date yet, remove all labels
-                            start_date = task_due_date - td
-                            future_diff = (
-                                datetime.today()-start_date).days
-                            if future_diff < 0:
-                                remove_label(
-                                    task, next_action_label, overview_task_ids, overview_task_labels)
-                                [remove_label(child_task, next_action_label, overview_task_ids,
-                                              overview_task_labels) for child_task in child_tasks]
-                                continue
+                    #         # If we're not in the offset from the due date yet, remove all labels
+                    #         start_date = task_due_date - td
+                    #         future_diff = (
+                    #             datetime.today()-start_date).days
+                    #         if future_diff < 0:
+                    #             remove_label(
+                    #                 task, next_action_label, overview_task_ids, overview_task_labels)
+                    #             [remove_label(child_task, next_action_label, overview_task_ids,
+                    #                           overview_task_labels) for child_task in child_tasks]
+                    #             continue
 
-                    except:
-                        logging.warning(
-                            'Wrong start-date format for task: %s. Please use "start=due-<NUM><d or w>"', task.content)
-                        continue
+                    # except:
+                    #     logging.warning(
+                    #         'Wrong start-date format for task: %s. Please use "start=due-<NUM><d or w>"', task.content)
+                    #     continue
 
     # Return all ids and corresponding labels that need to be modified
     return overview_task_ids, overview_task_labels
