@@ -4,6 +4,8 @@ from todoist_api_python.api import TodoistAPI
 from todoist_api_python.models import Task
 from todoist_api_python.models import Section
 from todoist_api_python.models import Project
+from todoist_api_python.http_requests import get
+from urllib.parse import urljoin
 import sys
 import time
 import requests
@@ -12,7 +14,6 @@ import logging
 from datetime import datetime, timedelta
 import time
 import sqlite3
-from sqlite3 import Error
 import os
 
 # Connect to SQLite database
@@ -429,6 +430,18 @@ def check_for_update(current_version):
         logging.error("Error while checking for updates: {}".format(e))
         return 1
 
+# Get all data through the SYNC API. Needed to see e.g. any completed tasks.
+    
+def get_all_data(self, api):
+    BASE_URL = "https://api.todoist.com"
+    SYNC_VERSION = "v9"
+    SYNC_API = urljoin(BASE_URL, f"/sync/{SYNC_VERSION}/")
+    COMPLETED_GET_ALL = "completed/get_all"
+    endpoint = urljoin(SYNC_API, COMPLETED_GET_ALL)
+    data = get(api._session, endpoint, api._token)
+
+    return data
+
 # Assign current type based on settings
 
 
@@ -500,53 +513,55 @@ def get_type(args, connection, model, key):
 # Determine a project type
 
 
-def get_project_type(args, connection, project_model):
+def get_project_type(args, connection, project):
     """Identifies how a project should be handled."""
     project_type, project_type_changed = get_type(
-        args, connection, project_model, 'project_type')
+        args, connection, project, 'project_type')
+
+    if project_type is not None:
+        logging.debug('Identified \'%s\' as %s type',
+                      project.name, project_type)
 
     return project_type, project_type_changed
 
 # Determine a section type
 
 
-def get_section_type(args, connection, section_object):
+def get_section_type(args, connection, section):
     """Identifies how a section should be handled."""
-    if section_object is not None:
+    if section is not None:
         section_type, section_type_changed = get_type(
-            args, connection, section_object, 'section_type')
+            args, connection, section, 'section_type')
     else:
         section_type = None
         section_type_changed = 0
+
+    if section_type is not None:
+        logging.debug('Identified \'%s\' as %s type',
+                      section.name, section_type)
 
     return section_type, section_type_changed
 
 # Determine an task type
 
 
-def get_task_type(args, connection, task, section_type, project_type):
+def get_task_type(args, connection, task):
     """Identifies how a task with sub tasks should be handled."""
 
-    if project_type is None and section_type is None and task.parent_id != 0: #TODO: project type and section type, no?
-        try:
-            task_type = task.parent_type  # TODO: METADATA
-            task_type_changed = 1
-            task.task_type = task_type #TODO: METADATA
-        except:
-            task_type, task_type_changed = get_type(
-                args, connection, task, 'task_type')  # TODO: METADATA
-    else:
-        task_type, task_type_changed = get_type(
-            args, connection, task, 'task_type')  # TODO: METADATA
+    task_type, task_type_changed = get_type(
+        args, connection, task, 'task_type')
+
+    if task_type is not None:
+        logging.debug('Identified \'%s\' as %s type', task.content, task_type)
 
     return task_type, task_type_changed
 
 # Logic to track addition of a label to a task
 
 
-def add_label(task, label, overview_task_ids, overview_task_labels):
+def add_label(connection, task, dominant_type, label, overview_task_ids, overview_task_labels):
     if label not in task.labels:
-        labels = task.labels  # Copy other existing labels
+        labels = task.labels  # To also copy other existing labels
         logging.debug('Updating \'%s\' with label', task.content)
         labels.append(label)
 
@@ -555,6 +570,8 @@ def add_label(task, label, overview_task_ids, overview_task_labels):
         except:
             overview_task_ids[task.id] = 1
         overview_task_labels[task.id] = labels
+
+        db_update_value(connection, task, 'task_type', dominant_type)
 
 # Logic to track removal of a label from a task
 
@@ -828,10 +845,6 @@ def autodoist_magic(args, api, connection):
             project_type, project_type_changed = get_project_type(
                 args, connection, project)
 
-            if project_type is not None:
-                logging.debug('Identified \'%s\' as %s type',
-                              project.name, project_type)
-
         # Get all tasks for the project
         try:
             project_tasks = api.get_tasks(project_id=project.id)
@@ -875,9 +888,6 @@ def autodoist_magic(args, api, connection):
             # Get section type
             section_type, section_type_changed = get_section_type(
                 args, connection, section)
-            if section_type is not None:
-                logging.debug('Identified \'%s\' as %s type',
-                              section.name, section_type)
 
             # Get all tasks for the section
             tasks = [x for x in project_tasks if x.section_id
@@ -894,7 +904,7 @@ def autodoist_magic(args, api, connection):
             tasks = sorted(tasks, key=lambda x: (
                 int(x.parent_id), x.order))
 
-            # If a type has changed, clean all task labels for good measure
+            # If a type has changed, clean all tasks in this section for good measure
             if next_action_label is not None:
                 if project_type_changed == 1 or section_type_changed == 1:
                     # Remove labels
@@ -930,7 +940,7 @@ def autodoist_magic(args, api, connection):
                 # TODO: DISABLED FOR NOW, FIX LATER
                 # modify_headers(header_all_in_p, unheader_all_in_p, header_all_in_s, unheader_all_in_s, header_all_in_t, unheader_all_in_t)
 
-# TODO: Check is regeneration is still needed, now that it's part of core Todoist. Disabled for now.
+                # TODO: Check is regeneration is still needed, now that it's part of core Todoist. Disabled for now.
                 # Logic for recurring lists
                 # if not args.regeneration:
                 #     try:
@@ -959,11 +969,7 @@ def autodoist_magic(args, api, connection):
 
                     # Check task type
                     task_type, task_type_changed = get_task_type(
-                        args, connection, task, section_type, project_type)
-
-                    if task_type is not None:
-                        logging.debug('Identified \'%s\' as %s type',
-                                      task.content, task_type)
+                        args, connection, task)
 
                     # Determine hierarchy types for logic
                     hierarchy_types = [task_type,
@@ -977,7 +983,7 @@ def autodoist_magic(args, api, connection):
                             # Inherit task type
                             dominant_type = task_type
                             add_label(
-                                task, next_action_label, overview_task_ids, overview_task_labels)
+                                connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
 
                         elif hierarchy_boolean[1]:
                             # Inherit section type
@@ -986,11 +992,11 @@ def autodoist_magic(args, api, connection):
                             if section_type == 'sequential' or section_type == 's-p':
                                 if not first_found_section:
                                     add_label(
-                                        task, next_action_label, overview_task_ids, overview_task_labels)
+                                        connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
                                     first_found_section = True
                             elif section_type == 'parallel' or section_type == 'p-s':
                                 add_label(
-                                    task, next_action_label, overview_task_ids, overview_task_labels)
+                                    connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
 
                         elif hierarchy_boolean[2]:
                             # Inherit project type
@@ -999,12 +1005,12 @@ def autodoist_magic(args, api, connection):
                             if project_type == 'sequential' or project_type == 's-p':
                                 if not first_found_project:
                                     add_label(
-                                        task, next_action_label, overview_task_ids, overview_task_labels)
+                                        connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
                                     first_found_project = True
 
                             elif project_type == 'parallel' or project_type == 'p-s':
                                 add_label(
-                                    task, next_action_label, overview_task_ids, overview_task_labels)
+                                    connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
 
                         # Mark other conditions too
                         if first_found_section == False and hierarchy_boolean[1]:
@@ -1014,16 +1020,18 @@ def autodoist_magic(args, api, connection):
 
                     # If there are children
                     if len(child_tasks) > 0:
-                        
-                        # Check if task state has changed, if so clean children for good measure
-                        if task_type_changed == 1:
-                            [remove_label(child_task, next_action_label, overview_task_ids, overview_task_labels)
-                                for child_task in child_tasks]
 
-                        # If a sub-task, inherit parent task type
+                        #TODO: is this still needed?
+                        # # Check if task state has changed, if so clean children for good measure 
+                        # if task_type_changed == 1:
+                        #     [remove_label(child_task, next_action_label, overview_task_ids, overview_task_labels)
+                        #         for child_task in child_tasks]
+
+                        #If a sub-task, inherit parent task type
                         if task.parent_id != 0:
                             # dominant_type = task.parent_type  # TODO: METADATA
-                            dominant_type = db_read_value(connection, task, 'parent_type')[0][0]
+                            dominant_type = db_read_value(
+                                connection, task, 'parent_type')[0][0]
 
                         # Process sequential tagged tasks (task_type can overrule project_type)
                         if dominant_type == 'sequential' or dominant_type == 'p-s':
@@ -1038,7 +1046,7 @@ def autodoist_magic(args, api, connection):
                                 # Pass label down to the first child
                                 if not child_task.is_completed and next_action_label in task.labels:
                                     add_label(
-                                        child_task, next_action_label, overview_task_ids, overview_task_labels)
+                                        connection, child_task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
                                     remove_label(
                                         task, next_action_label, overview_task_ids, overview_task_labels)
                                 else:
@@ -1050,7 +1058,7 @@ def autodoist_magic(args, api, connection):
                         elif dominant_type == 'parallel' or (dominant_type == 's-p' and next_action_label in task.labels):
                             remove_label(
                                 task, next_action_label, overview_task_ids, overview_task_labels)
-                            db_update_value(task, 'task_type', 'NULL')
+                            db_update_value(connection, task, 'task_type', None) #TODO: integrate in remove_label funcionality, else a lot of duplicates. #TODO: None not registered, fix bug.
 
                             for child_task in child_tasks:
 
@@ -1059,11 +1067,12 @@ def autodoist_magic(args, api, connection):
                                     continue
 
                                 # child_task.parent_type = dominant_type  # TODO: METADATA
-                                db_update_value(connection, child_task, 'parent_type', dominant_type)
+                                db_update_value(
+                                    connection, child_task, 'parent_type', dominant_type)
 
                                 if not child_task.is_completed:
                                     add_label(
-                                        child_task, next_action_label, overview_task_ids, overview_task_labels)
+                                        connection, child_task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
 
                     # Remove labels based on start / due dates
 
