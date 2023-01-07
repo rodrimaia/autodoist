@@ -1052,12 +1052,16 @@ def autodoist_magic(args, api, connection):
                         #     [remove_label(child_task, next_action_label, overview_task_ids, overview_task_labels)
                         #         for child_task in child_tasks]
 
-                        #If it is a sub-task with no own type, inherit the parent task type instead
+                        # If it is a sub-task with no own type, inherit the parent task type instead
                         if task.parent_id != 0 and task_type == None:
                             # dominant_type = task.parent_type  # TODO: METADATA
                             dominant_type = db_read_value(
                                 connection, task, 'parent_type')[0][0]
 
+                        # If it is a sub-task with no dominant type (e.g. lower level child with new task_type), use the task type
+                        if task.parent_id != 0 and dominant_type == None:
+                            dominant_type = task_type
+                        
                         # Process sequential tagged tasks (task_type can overrule project_type)
                         if dominant_type == 'sequential' or dominant_type == 'p-s':
                             for child_task in child_tasks:
@@ -1067,17 +1071,19 @@ def autodoist_magic(args, api, connection):
                                     continue
 
                                 # Pass task_type down to the children
-                                child_task.parent_type = dominant_type
+                                db_update_value(
+                                    connection, child_task, 'parent_type', dominant_type)
+
                                 # Pass label down to the first child
                                 if not child_task.is_completed and next_action_label in task.labels:
                                     add_label(
                                         connection, child_task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
                                     remove_label(
                                         task, next_action_label, overview_task_ids, overview_task_labels)
-                                else:
-                                    # Clean for good measure
-                                    remove_label(
-                                        child_task, next_action_label, overview_task_ids, overview_task_labels)
+                                # else: #TODO: is this still needed?
+                                #     # Clean for good measure
+                                #     remove_label(
+                                #         child_task, next_action_label, overview_task_ids, overview_task_labels)
 
                         # Process parallel tagged tasks or untagged parents
                         elif dominant_type == 'parallel' or (dominant_type == 's-p' and next_action_label in task.labels):
