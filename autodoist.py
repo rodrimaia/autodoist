@@ -817,6 +817,19 @@ def find_and_clean_all_children(task_ids, task, section_tasks):
 
     return task_ids
 
+# Logic to pass label data
+
+def label_according_to_type(hierarchy_type, first_found, connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels):
+
+    if hierarchy_type == 'sequential' or hierarchy_type == 's-p':
+        if not first_found:
+            add_label(
+                connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+            first_found = True
+    elif hierarchy_type == 'parallel' or hierarchy_type == 'p-s':
+        add_label(
+            connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+
 
 # Contains all main autodoist functionalities
 
@@ -931,9 +944,15 @@ def autodoist_magic(args, api, connection):
 
             # For all tasks in this section
             for task in section_tasks:
-                dominant_type = None  # Reset
+                
+                # Reset
+                dominant_type = None  
 
+                # Check db existance
                 db_check_existance(connection, task)
+
+                # To determine if a sequential task was found
+                first_found_tasks = False
 
                 # Determine which child_tasks exist, both all and the ones that have not been checked yet
                 non_completed_tasks = list(
@@ -1005,40 +1024,25 @@ def autodoist_magic(args, api, connection):
                         if hierarchy_boolean[0]:
                             # Inherit task type
                             dominant_type = task_type
-                            add_label(
-                                connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                            label_according_to_type(task_type , first_found_tasks, connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
 
                         elif hierarchy_boolean[1]:
                             # Inherit section type
                             dominant_type = section_type
-
-                            if section_type == 'sequential' or section_type == 's-p':
-                                if not first_found_section:
-                                    add_label(
-                                        connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
-                                    first_found_section = True
-                            elif section_type == 'parallel' or section_type == 'p-s':
-                                add_label(
-                                    connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                            label_according_to_type(section_type, first_found_section, connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
 
                         elif hierarchy_boolean[2]:
                             # Inherit project type
                             dominant_type = project_type
-
-                            if project_type == 'sequential' or project_type == 's-p':
-                                if not first_found_project:
-                                    add_label(
-                                        connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
-                                    first_found_project = True
-
-                            elif project_type == 'parallel' or project_type == 'p-s':
-                                add_label(
-                                    connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                            label_according_to_type(project_type, first_found_project, connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                            
                         else:
                             # Parentless task has no type, so skip any children.
                             continue
 
                         # Mark other conditions too
+                        if first_found_tasks == False and hierarchy_boolean[0]:
+                            first_found_tasks = True
                         if first_found_section == False and hierarchy_boolean[1]:
                             first_found_section = True
                         if first_found_project is False and hierarchy_boolean[2]:
