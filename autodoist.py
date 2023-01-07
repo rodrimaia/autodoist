@@ -803,6 +803,20 @@ def run_recurring_lists_logic(args, api, item, child_items, child_items_all, reg
             #               item.content)
             pass
 
+# Find and clean all children under a task
+
+def find_and_clean_all_children(task_ids, task, section_tasks):
+
+    child_tasks = list(filter(lambda x: x.parent_id == task.id, section_tasks))
+
+    if child_tasks != []:
+        for child_task in child_tasks:
+            # Children found, go deeper
+            task_ids.append(child_task.id)
+            task_ids = find_and_clean_all_children(task_ids, child_task, section_tasks)
+
+    return task_ids
+
 
 # Contains all main autodoist functionalities
 
@@ -970,7 +984,12 @@ def autodoist_magic(args, api, connection):
                     # If task type has changed, clean all of its children for good measure
                     if next_action_label is not None:
                         if task_type_changed == 1:
-                            for child_task in child_tasks:
+
+                            # Find all children under this task
+                            task_ids = find_and_clean_all_children([], task, section_tasks)
+                            child_tasks_all = list(filter(lambda x: x.id in task_ids, section_tasks))
+
+                            for child_task in child_tasks_all:
                                 remove_label(child_task, next_action_label, overview_task_ids, overview_task_labels)
                                 db_update_value(connection, child_task, 'task_type', None)
                                 db_update_value(connection, child_task, 'parent_type', None)
