@@ -1017,7 +1017,13 @@ def autodoist_magic(args, api, connection):
                     hierarchy_types = [task_type,
                                        section_type, project_type]
                     hierarchy_boolean = [type(x) != type(None)
-                                         for x in hierarchy_types]                
+                                         for x in hierarchy_types]
+
+                    # If task has no type, but has a label, most likely the order has been changed by user. Remove data.
+                    if not True in hierarchy_boolean and next_action_label in task.labels:
+                        remove_label(task, next_action_label, overview_task_ids, overview_task_labels)
+                        db_update_value(connection, task, 'task_type', None)
+                        db_update_value(connection, task, 'parent_type', None)              
 
                     # If it is a parentless task, set task type based on hierarchy
                     if task.parent_id == 0:
@@ -1043,6 +1049,10 @@ def autodoist_magic(args, api, connection):
                                         if not first_found[1]:
                                             add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
 
+                                        elif next_action_label in task.labels:
+                                            # Probably the task has been manually moved, so if it has a label, let's remove it.
+                                            remove_label(task, next_action_label, overview_task_ids, overview_task_labels)
+
                                     elif dominant_type[1] == 'p':
                                         add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
 
@@ -1051,6 +1061,10 @@ def autodoist_magic(args, api, connection):
                                 if dominant_type[1] == 's': 
                                     if not first_found[1]:
                                         add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                                    
+                                    elif next_action_label in task.labels:
+                                        # Probably the task has been manually moved, so if it has a label, let's remove it.
+                                        remove_label(task, next_action_label, overview_task_ids, overview_task_labels)
 
                                 elif dominant_type[1] == 'p':
                                     add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
@@ -1060,6 +1074,10 @@ def autodoist_magic(args, api, connection):
                                 if not first_found[1]:
                                     add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
 
+                                elif next_action_label in task.labels:
+                                    # Probably the task has been manually moved, so if it has a label, let's remove it.
+                                    remove_label(task, next_action_label, overview_task_ids, overview_task_labels)
+
                             elif dominant_type[0] == 'x' and dominant_type[1] == 'p':
                                 add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
 
@@ -1067,6 +1085,10 @@ def autodoist_magic(args, api, connection):
                             if dominant_type[1] == 'x' and dominant_type[2] == 's': 
                                 if not first_found[1]:
                                     add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+
+                                if next_action_label in task.labels:
+                                            # Probably the task has been manually moved, so if it has a label, let's remove it.
+                                            remove_label(task, next_action_label, overview_task_ids, overview_task_labels)
 
                             elif dominant_type[1] == 'x' and dominant_type[2] == 'p':
                                 add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
@@ -1098,6 +1120,9 @@ def autodoist_magic(args, api, connection):
                                 # Ignore headered children
                                 if child_task.content.startswith('*'):
                                     continue
+
+                                # Clean up for good measure.
+                                remove_label(child_task, next_action_label, overview_task_ids, overview_task_labels)
 
                                 # Pass task_type down to the children
                                 db_update_value(
