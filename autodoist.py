@@ -1190,52 +1190,42 @@ def autodoist_magic(args, api, connection):
                             'Wrong start-date format for task: "%s". Please use "start=<DD-MM-YYYY>"', task.content)
                         continue
 
-                    # Recurring task friendly - remove label with relative change from due date #TODO FIX THIS
-                    f2 = re.search('start=due-(\d)+([dw])', task.content)
-                    # try:
-                    #     f = task.content.find('start=due-')
-                    #     if f > -1:
-                    #         f1a = task.content.find(
-                    #             'd')  # Find 'd' from 'due'
-                    #         f1b = task.content.rfind(
-                    #             'd')  # Find 'd' from days
-                    #         f2 = task.content.find('w')
-                    #         f_end = task.content[f+10:].find(' ')
+                    # Recurring task friendly - remove label with relative change from due date
+                    if task.due is not None:
+                        try:
+                            f2 = re.search('start=due-(\d+)([dw])', task.content)
+                            
+                            if f2:
+                                offset = f2.groups()[0]
 
-                    #         if f_end > -1:
-                    #             offset = task.content[f+10:f+10+f_end-1]
-                    #         else:
-                    #             offset = task.content[f+10:-1]
+                                if f2.groups()[1] == 'd':
+                                    td = timedelta(days=int(offset))
+                                elif f2.groups()[1] == 'w':
+                                    td = timedelta(weeks=int(offset))
 
-                    #         try:
-                    #             task_due_date = task.due['date'][:10]
-                    #             task_due_date = datetime.strptime(
-                    #                 task_due_date, '%Y-%m-%d')
-                    #         except:
-                    #             logging.warning(
-                    #                 'No due date to determine start date for task: "%s".', task.content)
-                    #             continue
+                                # Determine start-date
+                                try:
+                                    due_date = datetime.strptime(task.due.datetime, "%Y-%m-%dT%H:%M:%S")
+                                except:
+                                    due_date = datetime.strptime(task.due.date, "%Y-%m-%d")
 
-                    #         if f1a != f1b and f1b > -1:  # To make sure it doesn't trigger if 'w' is chosen
-                    #             td = timedelta(days=int(offset))
-                    #         elif f2 > -1:
-                    #             td = timedelta(weeks=int(offset))
+                                start_date = due_date - td
+                                
+                                # If we're not in the offset from the due date yet, remove all labels
+                                future_diff = (
+                                    datetime.today()-start_date).days
 
-                    #         # If we're not in the offset from the due date yet, remove all labels
-                    #         start_date = task_due_date - td
-                    #         future_diff = (
-                    #             datetime.today()-start_date).days
-                    #         if future_diff < 0:
-                    #             remove_label(
-                    #                 task, next_action_label, overview_task_ids, overview_task_labels)
-                    #             [remove_label(child_task, next_action_label, overview_task_ids,
-                    #                           overview_task_labels) for child_task in child_tasks]
-                    #             continue
+                                if future_diff < 0:
+                                    remove_label(
+                                        task, next_action_label, overview_task_ids, overview_task_labels)
+                                    [remove_label(child_task, next_action_label, overview_task_ids,
+                                                overview_task_labels) for child_task in child_tasks]
+                                    continue
 
-                    # except:
-                    #     logging.warning(
-                    #         'Wrong start-date format for task: %s. Please use "start=due-<NUM><d or w>"', task.content)
-                    #     continue
+                        except:
+                            logging.warning(
+                                'Wrong start-date format for task: %s. Please use "start=due-<NUM><d or w>"', task.content)
+                            continue
 
                 # Mark first found task in section
                 if next_action_label is not None and first_found[1] == False: #TODO: is this always true? What about starred tasks?
