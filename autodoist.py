@@ -440,7 +440,7 @@ def get_all_data(self, api):
 
     return data
 
-# Assign current type based on settings
+# Find the type based on name suffix.
 
 
 def check_name(args, string, num):
@@ -469,6 +469,13 @@ def check_name(args, string, num):
                     current_type += 's'
                 elif s == args.p_suffix:
                     current_type += 'p'
+        
+        # Always return a three letter string
+        if len(current_type) == 2:
+            current_type = 'x' + current_type
+        elif len(current_type) == 1:
+            current_type = 'xx' + current_type
+
     except:
         logging.debug("String {} not recognised.".format(string))
         current_type = None
@@ -1020,7 +1027,7 @@ def autodoist_magic(args, api, connection):
                             # Parentless task has no type, so skip any children.
                             continue
                         else:
-                            if hierarchy_boolean[1]:
+                            if hierarchy_boolean[0]:
                                 # Inherit task type
                                 dominant_type = task_type
                             elif hierarchy_boolean[1]:
@@ -1030,8 +1037,7 @@ def autodoist_magic(args, api, connection):
                                 # Inherit project type
                                 dominant_type = project_type
 
-                            # for ind, char in enumerate(dominant_type):
-
+                            # If indicated on project level
                             if dominant_type[0] == 's':
                                 if not first_found[0]:
 
@@ -1051,6 +1057,22 @@ def autodoist_magic(args, api, connection):
                                 elif dominant_type[1] == 'p':
                                     add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
 
+                            # If indicated on section level
+                            if dominant_type[0] == 'x' and dominant_type[1] == 's': 
+                                if not first_found[1]:
+                                    add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+
+                            elif dominant_type[0] == 'x' and dominant_type[1] == 'p':
+                                add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+
+                            # If indicated on parentless task level
+                            if dominant_type[1] == 'x' and dominant_type[2] == 's': 
+                                if not first_found[1]:
+                                    add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+
+                            elif dominant_type[1] == 'x' and dominant_type[2] == 'p':
+                                add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+
                     # If a parentless or sub-task which has children
                     if len(child_tasks) > 0:
 
@@ -1064,10 +1086,10 @@ def autodoist_magic(args, api, connection):
                         if task.parent_id != 0 and dominant_type == None:
                             dominant_type = task_type
                         
-                        # Only last character is relevant
+                        # Only last character is relevant for subtasks
                         dominant_type = dominant_type[-1]
 
-                        # Process sequential tagged tasks (task_type can overrule project_type)
+                        # Process sequential tagged tasks
                         if dominant_type == 's':
 
                             for child_task in child_tasks:
@@ -1086,13 +1108,8 @@ def autodoist_magic(args, api, connection):
                                         connection, child_task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
                                     remove_label(
                                         task, next_action_label, overview_task_ids, overview_task_labels)
-                                # else: #TODO: is this still needed?
-                                #     # Clean for good measure
-                                #     remove_label(
-                                #         child_task, next_action_label, overview_task_ids, overview_task_labels)
 
                         # Process parallel tagged tasks or untagged parents
-                        # elif dominant_type == 'parallel' or (dominant_type == 's-p' and next_action_label in task.labels):
                         elif dominant_type == 'p' and next_action_label in task.labels:
                             remove_label(
                                 task, next_action_label, overview_task_ids, overview_task_labels)
