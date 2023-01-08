@@ -492,7 +492,6 @@ def get_type(args, connection, model, key):
     # model_name = ''
 
     try:
-        # TODO: METADATA: this information used to be part of the metadata, needs to be retreived from own database
         old_type = ''
         old_type = db_read_value(connection, model, key)[0][0]
 
@@ -513,7 +512,6 @@ def get_type(args, connection, model, key):
     else:
         type_changed = 1
         db_update_value(connection, model, key, current_type)
-        # model.key = current_type #TODO: METADATA: this information used to be part of the metadata, needs to be retreived from own database
 
     return current_type, type_changed
 
@@ -613,18 +611,6 @@ def check_header(level):
     header_all_in_level = False
     unheader_all_in_level = False
     method = 0
-
-    try:
-        # Support for legacy structure #TODO: can probably be removed now due to REST API v2
-        name = level['name']
-        method = 1
-    except:
-        try:
-            # Current structure
-            content = level.content
-            method = 2
-        except:
-            pass
 
     if method == 1:
         if name[:3] == '** ':
@@ -992,10 +978,22 @@ def autodoist_magic(args, api, connection):
                     # Skip processing a task if it has already been checked or is a header
                     if task.is_completed:
                         continue
+
+                    # Remove clean all task and subtask data
                     if task.content.startswith('*'):
-                        # Remove next action label if it's still present
                         remove_label(task, next_action_label,
                                      overview_task_ids, overview_task_labels)
+                        db_update_value(connection, task, 'task_type', None)
+                        db_update_value(connection, task, 'parent_type', None)
+
+                        task_ids = find_and_clean_all_children([], task, section_tasks)
+                        child_tasks_all = list(filter(lambda x: x.id in task_ids, section_tasks))
+
+                        for child_task in child_tasks_all:
+                                remove_label(child_task, next_action_label, overview_task_ids, overview_task_labels)
+                                db_update_value(connection, child_task, 'task_type', None)
+                                db_update_value(connection, child_task, 'parent_type', None)
+
                         continue
 
                     # Check task type
@@ -1078,16 +1076,19 @@ def autodoist_magic(args, api, connection):
 
                         # If it is a sub-task with no own type, inherit the parent task type instead
                         if task.parent_id != 0 and task_type == None:
-                            # dominant_type = task.parent_type  # TODO: METADATA
                             dominant_type = db_read_value(
                                 connection, task, 'parent_type')[0][0]
 
                         # If it is a sub-task with no dominant type (e.g. lower level child with new task_type), use the task type
                         if task.parent_id != 0 and dominant_type == None:
                             dominant_type = task_type
-                        
-                        # Only last character is relevant for subtasks
-                        dominant_type = dominant_type[-1]
+
+                        if dominant_type is None:
+                            # Task with parent that has been headered, skip.
+                            continue
+                        else:
+                            # Only last character is relevant for subtasks
+                            dominant_type = dominant_type[-1]
 
                         # Process sequential tagged tasks
                         if dominant_type == 's':
@@ -1113,7 +1114,6 @@ def autodoist_magic(args, api, connection):
                         elif dominant_type == 'p' and next_action_label in task.labels:
                             remove_label(
                                 task, next_action_label, overview_task_ids, overview_task_labels)
-                            # db_update_value(connection, task, 'task_type', None) #TODO: integrate in remove_label funcionality, else a lot of duplicates.
 
                             for child_task in child_tasks:
 
@@ -1121,7 +1121,6 @@ def autodoist_magic(args, api, connection):
                                 if child_task.content.startswith('*'):
                                     continue
 
-                                # child_task.parent_type = dominant_type  # TODO: METADATA
                                 db_update_value(
                                     connection, child_task, 'parent_type', dominant_type)
 
