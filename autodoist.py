@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 import time
 import sqlite3
 import os
+import re
 
 # Connect to SQLite database
 
@@ -442,35 +443,37 @@ def get_all_data(self, api):
 # Assign current type based on settings
 
 
-def check_name(args, name):
-    len_suffix = [len(args.pp_suffix), len(args.ss_suffix),
-                  len(args.ps_suffix), len(args.sp_suffix)]
+def check_name(args, string, num):
 
-    if name == None:
+    try:
+        # Find inbox or none section as exceptions
+        if string == None:
+            current_type = None
+            pass
+        elif string == 'Inbox':
+            current_type = args.inbox
+            pass
+        else:
+            # Find any = or - symbol at the end of the string. Look at last 3 for projects, 2 for sections, and 1 for tasks
+            regex = '[%s%s]{1,%s}$' % (args.s_suffix, args.p_suffix, str(num))
+            re_ind = re.search(regex, string)
+            suffix = re_ind[0]
+
+            # Somebody put fewer characters than intended. Take last character and apply for every missing one.    
+            if len(suffix) < num:
+                suffix += suffix[-1] * (num - len(suffix))
+
+            current_type = '' 
+            for s in suffix:
+                if s == args.s_suffix:
+                    current_type += 's'
+                elif s == args.p_suffix:
+                    current_type += 'p'
+    except:
+        logging.debug("String {} not recognised.".format(string))
         current_type = None
-        pass
-    elif name == 'Inbox':
-        current_type = args.inbox
-    elif name[-len_suffix[0]:] == args.pp_suffix:
-        current_type = 'parallel'
-    elif name[-len_suffix[1]:] == args.ss_suffix:
-        current_type = 'sequential'
-    elif name[-len_suffix[2]:] == args.ps_suffix:
-        current_type = 'p-s'
-    elif name[-len_suffix[3]:] == args.sp_suffix:
-        current_type = 's-p'
-    # TODO: Remove below workarounds if standard notation is changing. Just messy and no longer needed.
-    # # Workaround for section names, which don't allow '/' symbol.
-    # elif args.ps_suffix == '/-' and name[-2:] == '_-':
-    #     current_type = 'p-s'
-    # # Workaround for section names, which don't allow '/' symbol.
-    # elif args.sp_suffix == '-/' and name[-2:] == '-_':
-    #     current_type = 's-p'
-    # # Workaround for section names, which don't allow '/' symbol.
-    # elif args.pp_suffix == '//' and name[-1:] == '_':
-    #     current_type = 'parallel'
-    else:
-        current_type = None
+
+
 
     return current_type
 
@@ -490,12 +493,12 @@ def get_type(args, connection, model, key):
         # logging.debug('No defined project_type: %s' % str(e))
         old_type = None
 
-    # model_name = model.name.strip() % TODO: Is this still needed?
-
-    try:
-        current_type = check_name(args, model.content)  # Tasks
-    except:
-        current_type = check_name(args, model.name)  # Project and sections
+    if isinstance(model, Task):
+            current_type = check_name(args, model.content, 1)  # Tasks
+    elif isinstance(model, Section):
+            current_type = check_name(args, model.name, 2)  # Sections
+    elif isinstance(model, Project):
+            current_type = check_name(args, model.name, 3)  # Projects
 
     # Check if project type changed with respect to previous run
     if old_type == current_type:
@@ -817,20 +820,6 @@ def find_and_clean_all_children(task_ids, task, section_tasks):
 
     return task_ids
 
-# Logic to pass label data
-
-def label_according_to_type(hierarchy_type, first_found, connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels):
-
-    if hierarchy_type == 'sequential' or hierarchy_type == 's-p':
-        if not first_found:
-            add_label(
-                connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
-            first_found = True
-    elif hierarchy_type == 'parallel' or hierarchy_type == 'p-s':
-        add_label(
-            connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
-
-
 # Contains all main autodoist functionalities
 
 
@@ -841,6 +830,7 @@ def autodoist_magic(args, api, connection):
     overview_task_labels = {}
     next_action_label = args.label
     regen_labels_id = args.regen_label_names
+    first_found = [False, False, False]
 
     try:
         projects = api.get_projects()
@@ -856,9 +846,6 @@ def autodoist_magic(args, api, connection):
         # Check db existance
         db_check_existance(connection, project)
 
-        # To determine if a sequential task was found
-        first_found_project = False
-
         # Check if we need to (un)header entire project
         header_all_in_p, unheader_all_in_p = check_header(project)
 
@@ -866,6 +853,9 @@ def autodoist_magic(args, api, connection):
         if next_action_label is not None:
             project_type, project_type_changed = get_project_type(
                 args, connection, project)
+        else:
+            project_type = None
+            project_type_changed = 0
 
         # Get all tasks for the project
         try:
@@ -904,6 +894,9 @@ def autodoist_magic(args, api, connection):
         except Exception as error:
             print(error)
 
+        # Reset
+        first_found[0] = False
+
         for section in sections:
 
             # Check db existance
@@ -912,12 +905,13 @@ def autodoist_magic(args, api, connection):
             # Check if we need to (un)header entire secion
             header_all_in_s, unheader_all_in_s = check_header(section)
 
-            # To determine if a sequential task was found
-            first_found_section = False
-
             # Get section type
-            section_type, section_type_changed = get_section_type(
-                args, connection, section)
+            if next_action_label:
+                section_type, section_type_changed = get_section_type(
+                    args, connection, section)
+            else:
+                section_type = None
+                section_type_changed = 0
 
             # Get all tasks for the section
             section_tasks = [x for x in project_tasks if x.section_id
@@ -941,6 +935,9 @@ def autodoist_magic(args, api, connection):
                         remove_label(task, next_action_label, overview_task_ids, overview_task_labels)
                         db_update_value(connection, task, 'task_type', None)
                         db_update_value(connection, task, 'parent_type', None)
+            
+            # Reset
+            first_found[1] = False
 
             # For all tasks in this section
             for task in section_tasks:
@@ -951,8 +948,6 @@ def autodoist_magic(args, api, connection):
                 # Check db existance
                 db_check_existance(connection, task)
 
-                # To determine if a sequential task was found
-                first_found_tasks = False
 
                 # Determine which child_tasks exist, both all and the ones that have not been checked yet
                 non_completed_tasks = list(
@@ -1017,44 +1012,47 @@ def autodoist_magic(args, api, connection):
                     hierarchy_types = [task_type,
                                        section_type, project_type]
                     hierarchy_boolean = [type(x) != type(None)
-                                         for x in hierarchy_types]
+                                         for x in hierarchy_types]                
 
                     # If it is a parentless task, set task type based on hierarchy
                     if task.parent_id == 0:
-                        if hierarchy_boolean[0]:
-                            # Inherit task type
-                            dominant_type = task_type
-                            label_according_to_type(task_type , first_found_tasks, connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
-
-                        elif hierarchy_boolean[1]:
-                            # Inherit section type
-                            dominant_type = section_type
-                            label_according_to_type(section_type, first_found_section, connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
-
-                        elif hierarchy_boolean[2]:
-                            # Inherit project type
-                            dominant_type = project_type
-                            label_according_to_type(project_type, first_found_project, connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
-                            
-                        else:
+                        if not True in hierarchy_boolean:
                             # Parentless task has no type, so skip any children.
                             continue
+                        else:
+                            if hierarchy_boolean[1]:
+                                # Inherit task type
+                                dominant_type = task_type
+                            elif hierarchy_boolean[1]:
+                                # Inherit section type
+                                dominant_type = section_type
+                            elif hierarchy_boolean[2]:
+                                # Inherit project type
+                                dominant_type = project_type
 
-                        # Mark other conditions too
-                        if first_found_tasks == False and hierarchy_boolean[0]:
-                            first_found_tasks = True
-                        if first_found_section == False and hierarchy_boolean[1]:
-                            first_found_section = True
-                        if first_found_project is False and hierarchy_boolean[2]:
-                            first_found_project = True
+                            # for ind, char in enumerate(dominant_type):
+
+                            if dominant_type[0] == 's':
+                                if not first_found[0]:
+
+                                    if dominant_type[1] == 's': 
+                                        if not first_found[1]:
+                                            add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+
+                                    elif dominant_type[1] == 'p':
+                                        add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+
+                            elif dominant_type[0] == 'p':
+
+                                if dominant_type[1] == 's': 
+                                    if not first_found[1]:
+                                        add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+
+                                elif dominant_type[1] == 'p':
+                                    add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
 
                     # If a parentless or sub-task which has children
                     if len(child_tasks) > 0:
-
-                        # # Check if task state has changed, if so clean children for good measure 
-                        # if task_type_changed == 1:
-                        #     [remove_label(child_task, next_action_label, overview_task_ids, overview_task_labels)
-                        #         for child_task in child_tasks]
 
                         # If it is a sub-task with no own type, inherit the parent task type instead
                         if task.parent_id != 0 and task_type == None:
@@ -1066,8 +1064,12 @@ def autodoist_magic(args, api, connection):
                         if task.parent_id != 0 and dominant_type == None:
                             dominant_type = task_type
                         
+                        # Only last character is relevant
+                        dominant_type = dominant_type[-1]
+
                         # Process sequential tagged tasks (task_type can overrule project_type)
-                        if dominant_type == 'sequential' or dominant_type == 'p-s':
+                        if dominant_type == 's':
+
                             for child_task in child_tasks:
 
                                 # Ignore headered children
@@ -1090,7 +1092,8 @@ def autodoist_magic(args, api, connection):
                                 #         child_task, next_action_label, overview_task_ids, overview_task_labels)
 
                         # Process parallel tagged tasks or untagged parents
-                        elif dominant_type == 'parallel' or (dominant_type == 's-p' and next_action_label in task.labels):
+                        # elif dominant_type == 'parallel' or (dominant_type == 's-p' and next_action_label in task.labels):
+                        elif dominant_type == 'p' and next_action_label in task.labels:
                             remove_label(
                                 task, next_action_label, overview_task_ids, overview_task_labels)
                             # db_update_value(connection, task, 'task_type', None) #TODO: integrate in remove_label funcionality, else a lot of duplicates.
@@ -1201,6 +1204,14 @@ def autodoist_magic(args, api, connection):
                     #         'Wrong start-date format for task: %s. Please use "start=due-<NUM><d or w>"', task.content)
                     #     continue
 
+                # Mark first found task in section
+                if next_action_label is not None and first_found[1] == False: #TODO: is this always true? What about starred tasks?
+                    first_found[1] = True
+
+            # Mark first found section with tasks in project (to account for None section)
+            if next_action_label is not None and first_found[0] == False and section_tasks: #TODO: is this always true? What about starred tasks?
+                first_found[0] = True
+
     # Return all ids and corresponding labels that need to be modified
     return overview_task_ids, overview_task_labels
 
@@ -1226,13 +1237,9 @@ def main():
     parser.add_argument(
         '-d', '--delay', help='specify the delay in seconds between syncs (default 5).', default=5, type=int)
     parser.add_argument(
-        '-pp', '--pp_suffix', help='change suffix for parallel-parallel labeling (default "==").', default='==')
+        '-p', '--p_suffix', help='change suffix for parallel labeling (default "=").', default='=')
     parser.add_argument(
-        '-ss', '--ss_suffix', help='change suffix for sequential-sequential labeling (default "--").', default='--')
-    parser.add_argument(
-        '-ps', '--ps_suffix', help='change suffix for parallel-sequential labeling (default "=-").', default='=-')
-    parser.add_argument(
-        '-sp', '--sp_suffix', help='change suffix for sequential-parallel labeling (default "-=").', default='-=')
+        '-s', '--s_suffix', help='change suffix for sequential labeling (default "-").', default='-')
     parser.add_argument(
         '-df', '--dateformat', help='strptime() format of starting date (default "%%d-%%m-%%Y").', default='%d-%m-%Y')
     parser.add_argument(
