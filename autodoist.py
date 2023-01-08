@@ -1155,7 +1155,7 @@ def autodoist_magic(args, api, connection):
 
                     # Remove labels based on start / due dates
 
-                    # If task is too far in the future, remove the next_action tag and skip #TODO: FIX THIS
+                    # If task is too far in the future, remove the next_action tag and skip
                     try:
                         if args.hide_future > 0 and task.due.date is not None:
                             due_date = datetime.strptime(
@@ -1169,29 +1169,21 @@ def autodoist_magic(args, api, connection):
                         # Hide-future not set, skip
                         pass
 
-                    # If start-date has not passed yet, remove label #TODO: FIX THIS
+                    # If start-date has not passed yet, remove label
                     try:
-                        f1 = task.content.find('start=')
-                        f2 = task.content.find('start=due-')
-                        if f1 > -1 and f2 == -1:
-                            f_end = task.content[f1+6:].find(' ')
-                            if f_end > -1:
-                                start_date = task.content[f1 +
-                                                          6:f1+6+f_end]
-                            else:
-                                start_date = task.content[f1+6:]
-
-                            # If start-date hasen't passed, remove all labels
+                        f1 = re.search('start=(\d{2}[-]\d{2}[-]\d{4})', task.content)
+                        if f1:
+                            start_date = f1.groups()[0]
                             start_date = datetime.strptime(
                                 start_date, args.dateformat)
                             future_diff = (
                                 datetime.today()-start_date).days
+                            # If start-date hasen't passed, remove all labels
                             if future_diff < 0:
                                 remove_label(
                                     task, next_action_label, overview_task_ids, overview_task_labels)
                                 [remove_label(child_task, next_action_label, overview_task_ids,
                                               overview_task_labels) for child_task in child_tasks]
-                                pass
 
                     except:
                         logging.warning(
@@ -1199,6 +1191,7 @@ def autodoist_magic(args, api, connection):
                         continue
 
                     # Recurring task friendly - remove label with relative change from due date #TODO FIX THIS
+                    f2 = re.search('start=due-(\d)+([dw])', task.content)
                     # try:
                     #     f = task.content.find('start=due-')
                     #     if f > -1:
