@@ -150,10 +150,10 @@ def db_check_existance(connection, model):
             if isinstance(model, Task):
                 q_create = """
                 INSERT INTO
-                tasks (task_id, task_type, parent_type, r_tag)
+                tasks (task_id, task_type, parent_type, due_date, r_tag)
                 VALUES
-                (%r, %s, %s, %i);
-                """ % (model.id, 'NULL', 'NULL', 0)
+                (%r, %s, %s, %s, %i);
+                """ % (model.id, 'NULL', 'NULL', 'NULL', 0)
 
             if isinstance(model, Section):
                 q_create = """
@@ -208,6 +208,7 @@ def initialise_sqlite():
     task_id INTEGER,
     task_type TEXT,
     parent_type TEXT,
+    due_date TEXT,
     r_tag INTEGER
     );
     """
@@ -506,7 +507,7 @@ def get_type(args, connection, model, key):
     elif isinstance(model, Project):
             current_type = check_name(args, model.name, 3)  # Projects
 
-    # Check if project type changed with respect to previous run
+    # Check if type changed with respect to previous run
     if old_type == current_type:
         type_changed = 0
     else:
@@ -607,25 +608,36 @@ def update_labels(api, overview_task_ids, overview_task_labels):
 # Check if header logic needs to be applied
 
 
-def check_header(level):
+def check_header(api, model):
     header_all_in_level = False
     unheader_all_in_level = False
-    method = 0
+    regex_a = '(^[*]{2}\s*)(.*)'
+    regex_b = '(^!\*\s*)(.*)'
 
-    if method == 1:
-        if name[:3] == '** ':
+    if isinstance(model, Task):
+        ra = re.search(regex_a, model.content)
+        rb = re.search(regex_b, model.content)
+        prefix_a = ra[0]
+        prefix_b = rb[0]
+
+        if prefix_a:
             header_all_in_level = True
-            level.update(name=name[3:])
-        if name[:3] == '!* ' or name[:3] == '_* ':
+            api.update_task(task_id=model.id, content=ra[2])
+        if prefix_b:
             unheader_all_in_level = True
-            level.update(name=name[3:])
-    elif method == 2:
-        if content[:3] == '** ':
-            header_all_in_level = True
-            level.update(content=content[3:])
-        if content[:3] == '!* ' or content[:3] == '_* ':
-            unheader_all_in_level = True
-            level.update(content=content[3:])
+            api.update_task(task_id=model.id, content=ra[2])
+
+    # api.update_section(section_id="7025", name="Supermarket")
+    # api.update_project(project_id="2203306141", name="Things To Buy")        
+
+    # elif isinstance(model, Section) or isinstance(model, Project):
+    #     if name[:3] == '** ':
+    #         header_all_in_level = True
+    #         level.update(name=name[3:])
+    #     if name[:3] == '!* ' or name[:3] == '_* ':
+    #         unheader_all_in_level = True
+    #         level.update(name=name[3:])
+
     else:
         pass
 
@@ -687,43 +699,52 @@ def check_regen_mode(api, item, regen_labels_id):
 # Recurring lists logic
 
 
-def run_recurring_lists_logic(args, api, item, child_items, child_items_all, regen_labels_id):
+def run_recurring_lists_logic(args, api,connection, task, task_items, task_items_all, regen_labels_id):
 
-    if item['parent_id'] == 0:
+    if task.parent_id == 0:
         try:
-            if item['due']['is_recurring']:
+            if task.due.is_recurring:
                 try:
-                    # Check if the T0 task date has changed
-                    if item['due']['date'][:10] != item['date_old']:
+                    db_task_due_date = db_read_value(connection, task, 'due_date')[0][0]
 
-                        # Mark children for action based on mode
-                        if args.regeneration is not None:
+                    if db_task_due_date is None:
+                        # If date has never been saved before, create a new entry
+                        logging.debug(
+                            'New recurring task detected: %s' % task.content)
+                        db_update_value(connection, task, 'due_date', task.due.date)
 
-                            # Check if task has a regen label
-                            regen_mode = check_regen_mode(
-                                api, item, regen_labels_id)
+                    # Check if the T0 task date has changed, because a user has checked the task
+                    if task.due.date != db_task_due_date:
 
-                            # If no label, use general mode instead
-                            if regen_mode is None:
-                                regen_mode = args.regeneration
-                                logging.debug('Using general recurring mode \'%s\' for item: %s',
-                                              regen_mode, item.content)
-                            else:
-                                logging.debug('Using recurring label \'%s\' for item: %s',
-                                              regen_mode, item.content)
+                        #TODO: reevaluate regeneration mode. Disabled for now.
+                        # # Mark children for action based on mode 
+                        # if args.regeneration is not None:
 
-                            # Apply tags based on mode
-                            give_regen_tag = 0
+                        #     # Check if task has a regen label
+                        #     regen_mode = check_regen_mode(
+                        #         api, item, regen_labels_id)
 
-                            if regen_mode == 1:  # Regen all
-                                give_regen_tag = 1
-                            elif regen_mode == 2:  # Regen if all sub-tasks completed
-                                if not child_items:
-                                    give_regen_tag = 1
+                        #     # If no label, use general mode instead
+                        #     if regen_mode is None:
+                        #         regen_mode = args.regeneration
+                        #         logging.debug('Using general recurring mode \'%s\' for item: %s',
+                        #                       regen_mode, item.content)
+                        #     else:
+                        #         logging.debug('Using recurring label \'%s\' for item: %s',
+                        #                       regen_mode, item.content)
 
-                            if give_regen_tag == 1:
-                                for child_item in child_items_all:
-                                    child_item['r_tag'] = 1
+                        #     # Apply tags based on mode
+                        #     give_regen_tag = 0
+
+                        #     if regen_mode == 1:  # Regen all
+                        #         give_regen_tag = 1
+                        #     elif regen_mode == 2:  # Regen if all sub-tasks completed
+                        #         if not child_items:
+                        #             give_regen_tag = 1
+
+                        #     if give_regen_tag == 1:
+                        #         for child_item in child_items_all:
+                        #             child_item['r_tag'] = 1
 
                         # If alternative end of day, fix due date if needed
                         if args.end is not None:
@@ -735,10 +756,8 @@ def run_recurring_lists_logic(args, api, item, child_items, child_items_all, reg
                             if (args.end - current_hour) > 0:
 
                                 # Determine the difference in days set by todoist
-                                nd = [
-                                    int(x) for x in item['due']['date'][:10].split('-')]
-                                od = [
-                                    int(x) for x in item['date_old'][:10].split('-')]
+                                nd = [int(x) for x in task.due.date.split('-')]
+                                od = [int(x) for x in db_task_due_date.split('-')]
 
                                 new_date = datetime(
                                     nd[0], nd[1], nd[2])
@@ -755,49 +774,39 @@ def run_recurring_lists_logic(args, api, item, child_items, child_items_all, reg
                                 if days_overdue >= 1 and days_difference == 1:
 
                                     # Find current date in string format
-                                    today_str = [str(x) for x in [
-                                        today.year, today.month, today.day]]
-                                    if len(today_str[1]) == 1:
-                                        today_str[1] = ''.join(
-                                            ['0', today_str[1]])
+                                    today_str = t.strftime("%Y-%m-%d")
 
                                     # Update due-date to today
-                                    item_due = item['due']
-                                    item_due['date'] = '-'.join(
-                                        today_str)
-                                    item.update(due=item_due)
-                                    # item.update(due={'date': '2020-05-29', 'is_recurring': True, 'string': 'every day'})
+                                    api.update_task(task_id=task.id, due_date=today_str) #TODO: Apparently this breaks the reccuring string...
+                                    logging.info("Update date on task: '%s'" % (task.content))
 
                         # Save the new date for reference us
-                        item.update(
-                            date_old=item['due']['date'][:10])
+                        db_update_value(connection, task, 'due_date', task.due.date)
 
                 except:
                     # If date has never been saved before, create a new entry
                     logging.debug(
-                        'New recurring task detected: %s' % item.content)
-                    item['date_old'] = item['due']['date'][:10]
-                    api.items.update(item['id'])
+                        'New recurring task detected: %s' % task.content)
+                    db_update_value(connection, task, 'due_date', task.due.date)
 
         except:
-            # logging.debug(
-            #     'Parent not recurring: %s' % item.content)
             pass
+    
+    #TODO: reevaluate regeneration mode. Disabled for now.
+    # if args.regeneration is not None and item.parent_id != 0:
+    #     try:
+    #         if item['r_tag'] == 1:
+    #             item.update(checked=0)
+    #             item.update(in_history=0)
+    #             item['r_tag'] = 0
+    #             api.items.update(item['id'])
 
-    if args.regeneration is not None and item['parent_id'] != 0:
-        try:
-            if item['r_tag'] == 1:
-                item.update(checked=0)
-                item.update(in_history=0)
-                item['r_tag'] = 0
-                api.items.update(item['id'])
-
-                for child_item in child_items_all:
-                    child_item['r_tag'] = 1
-        except:
-            # logging.debug('Child not recurring: %s' %
-            #               item.content)
-            pass
+    #             for child_item in child_items_all:
+    #                 child_item['r_tag'] = 1
+    #     except:
+    #         # logging.debug('Child not recurring: %s' %
+    #         #               item.content)
+    #         pass
 
 # Find and clean all children under a task
 
@@ -840,7 +849,7 @@ def autodoist_magic(args, api, connection):
         db_check_existance(connection, project)
 
         # Check if we need to (un)header entire project
-        header_all_in_p, unheader_all_in_p = check_header(project)
+        header_all_in_p, unheader_all_in_p = check_header(api, project)
 
         # Get project type
         if next_action_label is not None:
@@ -896,7 +905,7 @@ def autodoist_magic(args, api, connection):
             db_check_existance(connection, section)
 
             # Check if we need to (un)header entire secion
-            header_all_in_s, unheader_all_in_s = check_header(section)
+            header_all_in_s, unheader_all_in_s = check_header(api, section)
 
             # Get section type
             if next_action_label:
@@ -951,7 +960,7 @@ def autodoist_magic(args, api, connection):
                     filter(lambda x: x.parent_id == task.id, non_completed_tasks))
 
                 # Check if we need to (un)header entire task tree
-                header_all_in_t, unheader_all_in_t = check_header(task)
+                header_all_in_t, unheader_all_in_t = check_header(api, task)
 
                 # Modify headers where needed
                 # TODO: DISABLED FOR NOW, FIX LATER
@@ -968,10 +977,10 @@ def autodoist_magic(args, api, connection):
                 #     except:
                 #         pass
 
-                # # If options turned on, start recurring lists logic
-                # if args.regeneration is not None or args.end:
-                #     run_recurring_lists_logic(
-                #         args, api, item, child_items, child_items_all, regen_labels_id)
+                # If options turned on, start recurring lists logic #TODO: regeneration currently doesn't work, becaue TASK_ENDPOINT doesn't show completed tasks. Use workaround.
+                if args.regeneration is not None or args.end:
+                    run_recurring_lists_logic(
+                        args, api, connection, task, child_tasks, child_tasks_all, regen_labels_id)
 
                 # If options turned on, start labelling logic
                 if next_action_label is not None:
