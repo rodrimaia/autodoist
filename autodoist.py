@@ -767,6 +767,7 @@ def run_recurring_lists_logic(args, api,connection, task, task_items, task_items
 
                                     # Update due-date to today
                                     api.update_task(task_id=task.id, due_date=today_str) #TODO: Apparently this breaks the reccuring string...
+                                    logging.info("Update date on task: '%s'" % (task.content))
 
                         # Save the new date for reference us
                         db_update_value(connection, task, 'due_date', task.due.date)
