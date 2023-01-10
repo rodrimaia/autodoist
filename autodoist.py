@@ -5,6 +5,7 @@ from todoist_api_python.models import Task
 from todoist_api_python.models import Section
 from todoist_api_python.models import Project
 from todoist_api_python.http_requests import get
+from todoist_api_python.http_requests import post
 from urllib.parse import urljoin
 import sys
 import time
