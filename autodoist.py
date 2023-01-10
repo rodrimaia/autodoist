@@ -431,7 +431,7 @@ def check_for_update(current_version):
 
 # Get all data through the SYNC API. Needed to see e.g. any completed tasks.
     
-def get_all_data(self, api):
+def get_all_data(api):
     BASE_URL = "https://api.todoist.com"
     SYNC_VERSION = "v9"
     SYNC_API = urljoin(BASE_URL, f"/sync/{SYNC_VERSION}/")
