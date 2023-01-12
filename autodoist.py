@@ -652,20 +652,21 @@ def check_header(api, model):
 # Logic for applying and removing headers
 
 
-def modify_headers(task, child_tasks, header_all_in_p, unheader_all_in_p, header_all_in_s, unheader_all_in_s, header_all_in_t, unheader_all_in_t):
+def modify_headers(api, task, child_tasks, header_all_in_p, unheader_all_in_p, header_all_in_s, unheader_all_in_s, header_all_in_t, unheader_all_in_t):
     if any([header_all_in_p, header_all_in_s, header_all_in_t]):
         if task.content[0] != '*':
-            task.update(content='* ' + task.content)
+            api.update_task(task_id=task.id, content='* ' + task.content)
+
             for ci in child_tasks:
                 if not ci.content.startswith('*'):
-                    ci.update(content='* ' + ci.content)
+                    api.update_task(task_id=ci.id, content='* ' + ci.content)
 
     if any([unheader_all_in_p, unheader_all_in_s]):
         if task.content[0] == '*':
-            task.update(content=task.content[2:])
+            api.update_task(task_id=task.id, content=task.content[2:])
+
     if unheader_all_in_t:
-        [ci.update(content=ci.content[2:])
-            for ci in child_tasks]
+        [api.update_task(task_id=ci.id, content=ci.content[2:]) for ci in child_tasks]
 
 # Check regen mode based on label name
 
@@ -969,8 +970,7 @@ def autodoist_magic(args, api, connection):
                 header_all_in_t, unheader_all_in_t = check_header(api, task)
 
                 # Modify headers where needed
-                # TODO: DISABLED FOR NOW, FIX LATER
-                # modify_headers(header_all_in_p, unheader_all_in_p, header_all_in_s, unheader_all_in_s, header_all_in_t, unheader_all_in_t)
+                modify_headers(api, task, child_tasks, header_all_in_p, unheader_all_in_p, header_all_in_s, unheader_all_in_s, header_all_in_t, unheader_all_in_t)
 
                 # TODO: Check is regeneration is still needed, now that it's part of core Todoist. Disabled for now.
                 # Logic for recurring lists
