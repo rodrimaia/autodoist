@@ -612,34 +612,40 @@ def check_header(api, model):
     header_all_in_level = False
     unheader_all_in_level = False
     regex_a = '(^[*]{2}\s*)(.*)'
-    regex_b = '(^!\*\s*)(.*)'
+    regex_b = '(^\-\*\s*)(.*)'
 
-    if isinstance(model, Task):
-        ra = re.search(regex_a, model.content)
-        rb = re.search(regex_b, model.content)
-        prefix_a = ra[0]
-        prefix_b = rb[0]
+    try:
+        if isinstance(model, Task):
+            ra = re.search(regex_a, model.content)
+            rb = re.search(regex_b, model.content)
 
-        if prefix_a:
-            header_all_in_level = True
-            api.update_task(task_id=model.id, content=ra[2])
-        if prefix_b:
-            unheader_all_in_level = True
-            api.update_task(task_id=model.id, content=ra[2])
+            if ra:
+                header_all_in_level = True
+                api.update_task(task_id=model.id, content=ra[2])
+            if rb:
+                unheader_all_in_level = True
+                api.update_task(task_id=model.id, content=rb[2])
+        else:
+            ra = re.search(regex_a, model.name)
+            rb = re.search(regex_b, model.name)
 
-    # api.update_section(section_id="7025", name="Supermarket")
-    # api.update_project(project_id="2203306141", name="Things To Buy")        
+            if isinstance(model, Section):
+                if ra:
+                    header_all_in_level = True
+                    api.update_section(section_id=model.id, name=ra[2])
+                if rb:
+                    unheader_all_in_level = True
+                    api.update_section(section_id=model.id, name=rb[2])
 
-    # elif isinstance(model, Section) or isinstance(model, Project):
-    #     if name[:3] == '** ':
-    #         header_all_in_level = True
-    #         level.update(name=name[3:])
-    #     if name[:3] == '!* ' or name[:3] == '_* ':
-    #         unheader_all_in_level = True
-    #         level.update(name=name[3:])
-
-    else:
-        pass
+            elif isinstance(model, Project):
+                if ra:
+                    header_all_in_level = True
+                    api.update_project(project_id=model.id, name=ra[2])
+                if rb:
+                    unheader_all_in_level = True
+                    api.update_project(project_id=model.id, name=rb[2])
+    except:
+        logging.debug('check_header: no right model found')
 
     return header_all_in_level, unheader_all_in_level
 
