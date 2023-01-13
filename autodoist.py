@@ -378,7 +378,7 @@ def initialise_api(args):
 
     api = TodoistAPI(**api_arguments)
 
-    logging.info("Autodoist has connected and is running fine!\n")
+    logging.info("Autodoist has successfully connected to Todoist!\n")
 
     # Check if labels exist
 
@@ -609,47 +609,83 @@ def update_labels(api, overview_task_ids, overview_task_labels):
 # Check if header logic needs to be applied
 
 
-def check_header(level):
+def check_header(api, model, overview_updated_ids):
     header_all_in_level = False
     unheader_all_in_level = False
-    method = 0
+    regex_a = '(^[*]{2}\s*)(.*)'
+    regex_b = '(^\-\*\s*)(.*)'
 
-    if method == 1:
-        if name[:3] == '** ':
-            header_all_in_level = True
-            level.update(name=name[3:])
-        if name[:3] == '!* ' or name[:3] == '_* ':
-            unheader_all_in_level = True
-            level.update(name=name[3:])
-    elif method == 2:
-        if content[:3] == '** ':
-            header_all_in_level = True
-            level.update(content=content[3:])
-        if content[:3] == '!* ' or content[:3] == '_* ':
-            unheader_all_in_level = True
-            level.update(content=content[3:])
-    else:
-        pass
+    try:
+        if isinstance(model, Task):
+            ra = re.search(regex_a, model.content)
+            rb = re.search(regex_b, model.content)
+
+            if ra:
+                header_all_in_level = True
+                model.content = ra[2] # Local record
+                api.update_task(task_id=model.id, content=ra[2])
+                # overview_updated_ids.append(model.id) # Ignore this one, since else it's count double
+            if rb:
+                unheader_all_in_level = True
+                model.content = rb[2] # Local record
+                api.update_task(task_id=model.id, content=rb[2])
+                overview_updated_ids.append(model.id)
+        else:
+            ra = re.search(regex_a, model.name)
+            rb = re.search(regex_b, model.name)
+
+            if isinstance(model, Section):
+                if ra:
+                    header_all_in_level = True
+                    api.update_section(section_id=model.id, name=ra[2])
+                    overview_updated_ids.append(model.id)
+                if rb:
+                    unheader_all_in_level = True
+                    api.update_section(section_id=model.id, name=rb[2])
+                    overview_updated_ids.append(model.id)
+
+            elif isinstance(model, Project):
+                if ra:
+                    header_all_in_level = True
+                    api.update_project(project_id=model.id, name=ra[2])
+                    overview_updated_ids.append(model.id)
+                if rb:
+                    unheader_all_in_level = True
+                    api.update_project(project_id=model.id, name=rb[2])
+                    overview_updated_ids.append(model.id)
+    except:
+        logging.debug('check_header: no right model found')
 
     return header_all_in_level, unheader_all_in_level
 
 # Logic for applying and removing headers
 
 
-def modify_headers(task, child_tasks, header_all_in_p, unheader_all_in_p, header_all_in_s, unheader_all_in_s, header_all_in_t, unheader_all_in_t):
-    if any([header_all_in_p, header_all_in_s, header_all_in_t]):
-        if task.content[0] != '*':
-            task.update(content='* ' + task.content)
-            for ci in child_tasks:
-                if not ci.content.startswith('*'):
-                    ci.update(content='* ' + ci.content)
+def modify_task_headers(api, task, section_tasks, overview_updated_ids, header_all_in_p, unheader_all_in_p, header_all_in_s, unheader_all_in_s, header_all_in_t, unheader_all_in_t):
 
+    if any([header_all_in_p, header_all_in_s]):
+        if task.content[:2] != '* ':
+            api.update_task(task_id=task.id, content='* ' + task.content)
+            overview_updated_ids.append(task.id)
+            
     if any([unheader_all_in_p, unheader_all_in_s]):
-        if task.content[0] == '*':
-            task.update(content=task.content[2:])
+        if task.content[:2] == '* ':
+            api.update_task(task_id=task.id, content=task.content[2:])
+            overview_updated_ids.append(task.id)
+
+    if header_all_in_t:
+        if task.content[:2] != '* ':
+            api.update_task(task_id=task.id, content='* ' + task.content)
+            overview_updated_ids.append(task.id)
+        find_and_headerify_all_children(api, task, section_tasks, overview_updated_ids, 1)
+
     if unheader_all_in_t:
-        [ci.update(content=ci.content[2:])
-            for ci in child_tasks]
+        if task.content[:2] == '* ':
+            api.update_task(task_id=task.id, content=task.content[2:])
+            overview_updated_ids.append(task.id)
+        find_and_headerify_all_children(api, task, section_tasks, overview_updated_ids, 2)
+
+        
 
 # Check regen mode based on label name
 
@@ -689,7 +725,7 @@ def check_regen_mode(api, item, regen_labels_id):
 # Recurring lists logic
 
 
-def run_recurring_lists_logic(args, api,connection, task, task_items, task_items_all, regen_labels_id):
+def run_recurring_lists_logic(args, api, connection, overview_updated_ids, task, task_items, task_items_all, regen_labels_id):
 
     if task.parent_id == 0:
         try:
@@ -812,6 +848,29 @@ def find_and_clean_all_children(task_ids, task, section_tasks):
 
     return task_ids
 
+def find_and_headerify_all_children(api, task, section_tasks, overview_updated_ids, mode):
+
+    child_tasks = list(filter(lambda x: x.parent_id == task.id, section_tasks))
+
+    if child_tasks != []:
+        for child_task in child_tasks:
+            # Children found, go deeper
+            if mode == 1:
+                if child_task.content[:2] != '* ':
+                    api.update_task(task_id=child_task.id, content='* ' + child_task.content)
+                    overview_updated_ids.append(child_task.id)
+                
+            elif mode == 2:
+                if child_task.content[:2] == '* ':
+                    api.update_task(task_id=child_task.id, content=child_task.content[2:])
+                    overview_updated_ids.append(child_task.id)
+
+            find_and_headerify_all_children(api, child_task, section_tasks, overview_updated_ids, mode)
+
+            
+
+    return 0
+
 # Contains all main autodoist functionalities
 
 
@@ -820,10 +879,12 @@ def autodoist_magic(args, api, connection):
     # Preallocate dictionaries and other values
     overview_task_ids = {}
     overview_task_labels = {}
+    overview_updated_ids = []
     next_action_label = args.label
     regen_labels_id = args.regen_label_names
     first_found = [False, False, False]
-
+    
+    # Get all projects info
     try:
         projects = api.get_projects()
     except Exception as error:
@@ -839,7 +900,7 @@ def autodoist_magic(args, api, connection):
         db_check_existance(connection, project)
 
         # Check if we need to (un)header entire project
-        header_all_in_p, unheader_all_in_p = check_header(project)
+        header_all_in_p, unheader_all_in_p = check_header(api, project, overview_updated_ids)
 
         # Get project type
         if next_action_label is not None:
@@ -895,7 +956,7 @@ def autodoist_magic(args, api, connection):
             db_check_existance(connection, section)
 
             # Check if we need to (un)header entire secion
-            header_all_in_s, unheader_all_in_s = check_header(section)
+            header_all_in_s, unheader_all_in_s = check_header(api, section, overview_updated_ids)
 
             # Get section type
             if next_action_label:
@@ -950,11 +1011,10 @@ def autodoist_magic(args, api, connection):
                     filter(lambda x: x.parent_id == task.id, non_completed_tasks))
 
                 # Check if we need to (un)header entire task tree
-                header_all_in_t, unheader_all_in_t = check_header(task)
+                header_all_in_t, unheader_all_in_t = check_header(api, task, overview_updated_ids)
 
                 # Modify headers where needed
-                # TODO: DISABLED FOR NOW, FIX LATER
-                # modify_headers(header_all_in_p, unheader_all_in_p, header_all_in_s, unheader_all_in_s, header_all_in_t, unheader_all_in_t)
+                modify_task_headers(api, task, section_tasks, overview_updated_ids, header_all_in_p, unheader_all_in_p, header_all_in_s, unheader_all_in_s, header_all_in_t, unheader_all_in_t)
 
                 # TODO: Check is regeneration is still needed, now that it's part of core Todoist. Disabled for now.
                 # Logic for recurring lists
@@ -970,7 +1030,7 @@ def autodoist_magic(args, api, connection):
                 # If options turned on, start recurring lists logic #TODO: regeneration currently doesn't work, becaue TASK_ENDPOINT doesn't show completed tasks. Use workaround.
                 if args.regeneration is not None or args.end:
                     run_recurring_lists_logic(
-                        args, api, connection, task, child_tasks, child_tasks_all, regen_labels_id)
+                        args, api, connection, overview_updated_ids, task, child_tasks, child_tasks_all, regen_labels_id)
 
                 # If options turned on, start labelling logic
                 if next_action_label is not None:
@@ -1235,7 +1295,7 @@ def autodoist_magic(args, api, connection):
                 first_found[0] = True
 
     # Return all ids and corresponding labels that need to be modified
-    return overview_task_ids, overview_task_labels
+    return overview_task_ids, overview_task_labels, overview_updated_ids
 
 # Main
 
@@ -1313,23 +1373,22 @@ def main():
         # sync(api)
 
         # Evaluate projects, sections, and tasks
-        overview_task_ids, overview_task_labels = autodoist_magic(
+        overview_task_ids, overview_task_labels, overview_updated_ids = autodoist_magic(
             args, api, connection)
 
         # Commit next action label changes
         if args.label is not None:
             updated_ids = update_labels(api, overview_task_ids,
                                         overview_task_labels)
+        num_changes = len(updated_ids)+len(overview_updated_ids)
 
-        if len(updated_ids):
-            len_api_q = len(updated_ids)
-
-            if len_api_q == 1:
+        if num_changes:
+            if num_changes == 1:
                 logging.info(
-                    '%d change committed to Todoist.', len_api_q)
+                    '%d change committed to Todoist.', num_changes)
             else:
                 logging.info(
-                    '%d changes committed to Todoist.', len_api_q)
+                    '%d changes committed to Todoist.', num_changes)
         else:
             logging.info('No changes in queue, skipping sync.')
 
