@@ -51,7 +51,8 @@ def execute_query(connection, query, *args):
     cursor = connection.cursor()
     try:
         value = args[0]
-        cursor.execute(query,(value,)) # Useful to pass None/NULL value correctly
+        # Useful to pass None/NULL value correctly
+        cursor.execute(query, (value,))
     except:
         cursor.execute(query)
 
@@ -118,7 +119,8 @@ def db_update_value(connection, model, column, value):
             db_name = 'projects'
             goal = 'project_id'
 
-        query = """UPDATE %s SET %s = ? WHERE %s = %r""" % (db_name, column, goal, model.id)
+        query = """UPDATE %s SET %s = ? WHERE %s = %r""" % (
+            db_name, column, goal, model.id)
 
         result = execute_query(connection, query, value)
 
@@ -431,7 +433,8 @@ def check_for_update(current_version):
         return 1
 
 # Get all data through the SYNC API. Needed to see e.g. any completed tasks.
-    
+
+
 def get_all_data(api):
     BASE_URL = "https://api.todoist.com"
     SYNC_VERSION = "v9"
@@ -461,17 +464,17 @@ def check_name(args, string, num):
             re_ind = re.search(regex, string)
             suffix = re_ind[0]
 
-            # Somebody put fewer characters than intended. Take last character and apply for every missing one.    
+            # Somebody put fewer characters than intended. Take last character and apply for every missing one.
             if len(suffix) < num:
                 suffix += suffix[-1] * (num - len(suffix))
 
-            current_type = '' 
+            current_type = ''
             for s in suffix:
                 if s == args.s_suffix:
                     current_type += 's'
                 elif s == args.p_suffix:
                     current_type += 'p'
-        
+
         # Always return a three letter string
         if len(current_type) == 2:
             current_type = 'x' + current_type
@@ -481,8 +484,6 @@ def check_name(args, string, num):
     except:
         logging.debug("String {} not recognised.".format(string))
         current_type = None
-
-
 
     return current_type
 
@@ -502,11 +503,11 @@ def get_type(args, connection, model, key):
         old_type = None
 
     if isinstance(model, Task):
-            current_type = check_name(args, model.content, 1)  # Tasks
+        current_type = check_name(args, model.content, 1)  # Tasks
     elif isinstance(model, Section):
-            current_type = check_name(args, model.name, 2)  # Sections
+        current_type = check_name(args, model.name, 2)  # Sections
     elif isinstance(model, Project):
-            current_type = check_name(args, model.name, 3)  # Projects
+        current_type = check_name(args, model.name, 3)  # Projects
 
     # Check if type changed with respect to previous run
     if old_type == current_type:
@@ -622,12 +623,12 @@ def check_header(api, model, overview_updated_ids):
 
             if ra:
                 header_all_in_level = True
-                model.content = ra[2] # Local record
+                model.content = ra[2]  # Local record
                 api.update_task(task_id=model.id, content=ra[2])
                 # overview_updated_ids.append(model.id) # Ignore this one, since else it's count double
             if rb:
                 unheader_all_in_level = True
-                model.content = rb[2] # Local record
+                model.content = rb[2]  # Local record
                 api.update_task(task_id=model.id, content=rb[2])
                 overview_updated_ids.append(model.id)
         else:
@@ -667,7 +668,7 @@ def modify_task_headers(api, task, section_tasks, overview_updated_ids, header_a
         if task.content[:2] != '* ':
             api.update_task(task_id=task.id, content='* ' + task.content)
             overview_updated_ids.append(task.id)
-            
+
     if any([unheader_all_in_p, unheader_all_in_s]):
         if task.content[:2] == '* ':
             api.update_task(task_id=task.id, content=task.content[2:])
@@ -677,15 +678,16 @@ def modify_task_headers(api, task, section_tasks, overview_updated_ids, header_a
         if task.content[:2] != '* ':
             api.update_task(task_id=task.id, content='* ' + task.content)
             overview_updated_ids.append(task.id)
-        find_and_headerify_all_children(api, task, section_tasks, overview_updated_ids, 1)
+        find_and_headerify_all_children(
+            api, task, section_tasks, overview_updated_ids, 1)
 
     if unheader_all_in_t:
         if task.content[:2] == '* ':
             api.update_task(task_id=task.id, content=task.content[2:])
             overview_updated_ids.append(task.id)
-        find_and_headerify_all_children(api, task, section_tasks, overview_updated_ids, 2)
+        find_and_headerify_all_children(
+            api, task, section_tasks, overview_updated_ids, 2)
 
-        
 
 # Check regen mode based on label name
 
@@ -731,19 +733,21 @@ def run_recurring_lists_logic(args, api, connection, overview_updated_ids, task,
         try:
             if task.due.is_recurring:
                 try:
-                    db_task_due_date = db_read_value(connection, task, 'due_date')[0][0]
+                    db_task_due_date = db_read_value(
+                        connection, task, 'due_date')[0][0]
 
                     if db_task_due_date is None:
                         # If date has never been saved before, create a new entry
                         logging.debug(
                             'New recurring task detected: %s' % task.content)
-                        db_update_value(connection, task, 'due_date', task.due.date)
+                        db_update_value(connection, task,
+                                        'due_date', task.due.date)
 
                     # Check if the T0 task date has changed, because a user has checked the task
                     if task.due.date != db_task_due_date:
 
-                        #TODO: reevaluate regeneration mode. Disabled for now.
-                        # # Mark children for action based on mode 
+                        # TODO: reevaluate regeneration mode. Disabled for now.
+                        # # Mark children for action based on mode
                         # if args.regeneration is not None:
 
                         #     # Check if task has a regen label
@@ -783,7 +787,8 @@ def run_recurring_lists_logic(args, api, connection, overview_updated_ids, task,
 
                                 # Determine the difference in days set by todoist
                                 nd = [int(x) for x in task.due.date.split('-')]
-                                od = [int(x) for x in db_task_due_date.split('-')]
+                                od = [int(x)
+                                      for x in db_task_due_date.split('-')]
 
                                 new_date = datetime(
                                     nd[0], nd[1], nd[2])
@@ -803,22 +808,26 @@ def run_recurring_lists_logic(args, api, connection, overview_updated_ids, task,
                                     today_str = t.strftime("%Y-%m-%d")
 
                                     # Update due-date to today
-                                    api.update_task(task_id=task.id, due_date=today_str, due_string=task.due.string) #TODO: Apparently this breaks the reccuring string...
-                                    logging.info("Update date on task: '%s'" % (task.content))
+                                    api.update_task(
+                                        task_id=task.id, due_date=today_str, due_string=task.due.string)
+                                    logging.info(
+                                        "Update date on task: '%s'" % (task.content))
 
                         # Save the new date for reference us
-                        db_update_value(connection, task, 'due_date', task.due.date)
+                        db_update_value(connection, task,
+                                        'due_date', task.due.date)
 
                 except:
                     # If date has never been saved before, create a new entry
                     logging.debug(
                         'New recurring task detected: %s' % task.content)
-                    db_update_value(connection, task, 'due_date', task.due.date)
+                    db_update_value(connection, task,
+                                    'due_date', task.due.date)
 
         except:
             pass
-    
-    #TODO: reevaluate regeneration mode. Disabled for now.
+
+    # TODO: reevaluate regeneration mode. Disabled for now.
     # if args.regeneration is not None and item.parent_id != 0:
     #     try:
     #         if item['r_tag'] == 1:
@@ -836,6 +845,7 @@ def run_recurring_lists_logic(args, api, connection, overview_updated_ids, task,
 
 # Find and clean all children under a task
 
+
 def find_and_clean_all_children(task_ids, task, section_tasks):
 
     child_tasks = list(filter(lambda x: x.parent_id == task.id, section_tasks))
@@ -844,9 +854,11 @@ def find_and_clean_all_children(task_ids, task, section_tasks):
         for child_task in child_tasks:
             # Children found, go deeper
             task_ids.append(child_task.id)
-            task_ids = find_and_clean_all_children(task_ids, child_task, section_tasks)
+            task_ids = find_and_clean_all_children(
+                task_ids, child_task, section_tasks)
 
     return task_ids
+
 
 def find_and_headerify_all_children(api, task, section_tasks, overview_updated_ids, mode):
 
@@ -857,17 +869,18 @@ def find_and_headerify_all_children(api, task, section_tasks, overview_updated_i
             # Children found, go deeper
             if mode == 1:
                 if child_task.content[:2] != '* ':
-                    api.update_task(task_id=child_task.id, content='* ' + child_task.content)
+                    api.update_task(task_id=child_task.id,
+                                    content='* ' + child_task.content)
                     overview_updated_ids.append(child_task.id)
-                
+
             elif mode == 2:
                 if child_task.content[:2] == '* ':
-                    api.update_task(task_id=child_task.id, content=child_task.content[2:])
+                    api.update_task(task_id=child_task.id,
+                                    content=child_task.content[2:])
                     overview_updated_ids.append(child_task.id)
 
-            find_and_headerify_all_children(api, child_task, section_tasks, overview_updated_ids, mode)
-
-            
+            find_and_headerify_all_children(
+                api, child_task, section_tasks, overview_updated_ids, mode)
 
     return 0
 
@@ -883,7 +896,7 @@ def autodoist_magic(args, api, connection):
     next_action_label = args.label
     regen_labels_id = args.regen_label_names
     first_found = [False, False, False]
-    
+
     # Get all projects info
     try:
         projects = api.get_projects()
@@ -900,7 +913,8 @@ def autodoist_magic(args, api, connection):
         db_check_existance(connection, project)
 
         # Check if we need to (un)header entire project
-        header_all_in_p, unheader_all_in_p = check_header(api, project, overview_updated_ids)
+        header_all_in_p, unheader_all_in_p = check_header(
+            api, project, overview_updated_ids)
 
         # Get project type
         if next_action_label is not None:
@@ -920,7 +934,8 @@ def autodoist_magic(args, api, connection):
         if next_action_label is not None:
             if project_type_changed == 1:
                 for task in project_tasks:
-                    remove_label(task, next_action_label, overview_task_ids, overview_task_labels)
+                    remove_label(task, next_action_label,
+                                 overview_task_ids, overview_task_labels)
                     db_update_value(connection, task, 'task_type', None)
                     db_update_value(connection, task, 'parent_type', None)
 
@@ -956,7 +971,8 @@ def autodoist_magic(args, api, connection):
             db_check_existance(connection, section)
 
             # Check if we need to (un)header entire secion
-            header_all_in_s, unheader_all_in_s = check_header(api, section, overview_updated_ids)
+            header_all_in_s, unheader_all_in_s = check_header(
+                api, section, overview_updated_ids)
 
             # Get section type
             if next_action_label:
@@ -968,7 +984,7 @@ def autodoist_magic(args, api, connection):
 
             # Get all tasks for the section
             section_tasks = [x for x in project_tasks if x.section_id
-                     == section.id]
+                             == section.id]
 
             # Change top tasks parents_id from 'None' to '0' in order to numerically sort later on
             for task in section_tasks:
@@ -985,22 +1001,22 @@ def autodoist_magic(args, api, connection):
             if next_action_label is not None:
                 if section_type_changed == 1:
                     for task in section_tasks:
-                        remove_label(task, next_action_label, overview_task_ids, overview_task_labels)
+                        remove_label(task, next_action_label,
+                                     overview_task_ids, overview_task_labels)
                         db_update_value(connection, task, 'task_type', None)
                         db_update_value(connection, task, 'parent_type', None)
-            
+
             # Reset
             first_found[1] = False
 
             # For all tasks in this section
             for task in section_tasks:
-                
+
                 # Reset
-                dominant_type = None  
+                dominant_type = None
 
                 # Check db existance
                 db_check_existance(connection, task)
-
 
                 # Determine which child_tasks exist, both all and the ones that have not been checked yet
                 non_completed_tasks = list(
@@ -1011,10 +1027,12 @@ def autodoist_magic(args, api, connection):
                     filter(lambda x: x.parent_id == task.id, non_completed_tasks))
 
                 # Check if we need to (un)header entire task tree
-                header_all_in_t, unheader_all_in_t = check_header(api, task, overview_updated_ids)
+                header_all_in_t, unheader_all_in_t = check_header(
+                    api, task, overview_updated_ids)
 
                 # Modify headers where needed
-                modify_task_headers(api, task, section_tasks, overview_updated_ids, header_all_in_p, unheader_all_in_p, header_all_in_s, unheader_all_in_s, header_all_in_t, unheader_all_in_t)
+                modify_task_headers(api, task, section_tasks, overview_updated_ids, header_all_in_p,
+                                    unheader_all_in_p, header_all_in_s, unheader_all_in_s, header_all_in_t, unheader_all_in_t)
 
                 # TODO: Check is regeneration is still needed, now that it's part of core Todoist. Disabled for now.
                 # Logic for recurring lists
@@ -1045,13 +1063,18 @@ def autodoist_magic(args, api, connection):
                         db_update_value(connection, task, 'task_type', None)
                         db_update_value(connection, task, 'parent_type', None)
 
-                        task_ids = find_and_clean_all_children([], task, section_tasks)
-                        child_tasks_all = list(filter(lambda x: x.id in task_ids, section_tasks))
+                        task_ids = find_and_clean_all_children(
+                            [], task, section_tasks)
+                        child_tasks_all = list(
+                            filter(lambda x: x.id in task_ids, section_tasks))
 
                         for child_task in child_tasks_all:
-                                remove_label(child_task, next_action_label, overview_task_ids, overview_task_labels)
-                                db_update_value(connection, child_task, 'task_type', None)
-                                db_update_value(connection, child_task, 'parent_type', None)
+                            remove_label(child_task, next_action_label,
+                                         overview_task_ids, overview_task_labels)
+                            db_update_value(
+                                connection, child_task, 'task_type', None)
+                            db_update_value(
+                                connection, child_task, 'parent_type', None)
 
                         continue
 
@@ -1064,13 +1087,18 @@ def autodoist_magic(args, api, connection):
                         if task_type_changed == 1:
 
                             # Find all children under this task
-                            task_ids = find_and_clean_all_children([], task, section_tasks)
-                            child_tasks_all = list(filter(lambda x: x.id in task_ids, section_tasks))
+                            task_ids = find_and_clean_all_children(
+                                [], task, section_tasks)
+                            child_tasks_all = list(
+                                filter(lambda x: x.id in task_ids, section_tasks))
 
                             for child_task in child_tasks_all:
-                                remove_label(child_task, next_action_label, overview_task_ids, overview_task_labels)
-                                db_update_value(connection, child_task, 'task_type', None)
-                                db_update_value(connection, child_task, 'parent_type', None)
+                                remove_label(
+                                    child_task, next_action_label, overview_task_ids, overview_task_labels)
+                                db_update_value(
+                                    connection, child_task, 'task_type', None)
+                                db_update_value(
+                                    connection, child_task, 'parent_type', None)
 
                     # Determine hierarchy types for logic
                     hierarchy_types = [task_type,
@@ -1080,9 +1108,10 @@ def autodoist_magic(args, api, connection):
 
                     # If task has no type, but has a label, most likely the order has been changed by user. Remove data.
                     if not True in hierarchy_boolean and next_action_label in task.labels:
-                        remove_label(task, next_action_label, overview_task_ids, overview_task_labels)
+                        remove_label(task, next_action_label,
+                                     overview_task_ids, overview_task_labels)
                         db_update_value(connection, task, 'task_type', None)
-                        db_update_value(connection, task, 'parent_type', None)              
+                        db_update_value(connection, task, 'parent_type', None)
 
                     # If it is a parentless task, set task type based on hierarchy
                     if task.parent_id == 0:
@@ -1104,53 +1133,65 @@ def autodoist_magic(args, api, connection):
                             if dominant_type[0] == 's':
                                 if not first_found[0]:
 
-                                    if dominant_type[1] == 's': 
+                                    if dominant_type[1] == 's':
                                         if not first_found[1]:
-                                            add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                                            add_label(
+                                                connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
 
                                         elif next_action_label in task.labels:
                                             # Probably the task has been manually moved, so if it has a label, let's remove it.
-                                            remove_label(task, next_action_label, overview_task_ids, overview_task_labels)
+                                            remove_label(
+                                                task, next_action_label, overview_task_ids, overview_task_labels)
 
                                     elif dominant_type[1] == 'p':
-                                        add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                                        add_label(
+                                            connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
 
                             elif dominant_type[0] == 'p':
 
-                                if dominant_type[1] == 's': 
+                                if dominant_type[1] == 's':
                                     if not first_found[1]:
-                                        add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
-                                    
+                                        add_label(
+                                            connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+
                                     elif next_action_label in task.labels:
                                         # Probably the task has been manually moved, so if it has a label, let's remove it.
-                                        remove_label(task, next_action_label, overview_task_ids, overview_task_labels)
+                                        remove_label(
+                                            task, next_action_label, overview_task_ids, overview_task_labels)
 
                                 elif dominant_type[1] == 'p':
-                                    add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                                    add_label(
+                                        connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
 
                             # If indicated on section level
-                            if dominant_type[0] == 'x' and dominant_type[1] == 's': 
+                            if dominant_type[0] == 'x' and dominant_type[1] == 's':
                                 if not first_found[1]:
-                                    add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                                    add_label(
+                                        connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
 
                                 elif next_action_label in task.labels:
                                     # Probably the task has been manually moved, so if it has a label, let's remove it.
-                                    remove_label(task, next_action_label, overview_task_ids, overview_task_labels)
+                                    remove_label(
+                                        task, next_action_label, overview_task_ids, overview_task_labels)
 
                             elif dominant_type[0] == 'x' and dominant_type[1] == 'p':
-                                add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                                add_label(connection, task, dominant_type, next_action_label,
+                                          overview_task_ids, overview_task_labels)
 
                             # If indicated on parentless task level
-                            if dominant_type[1] == 'x' and dominant_type[2] == 's': 
+                            if dominant_type[1] == 'x' and dominant_type[2] == 's':
                                 if not first_found[1]:
-                                    add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                                    add_label(
+                                        connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
 
                                 if next_action_label in task.labels:
-                                            # Probably the task has been manually moved, so if it has a label, let's remove it.
-                                            remove_label(task, next_action_label, overview_task_ids, overview_task_labels)
+                                    # Probably the task has been manually moved, so if it has a label, let's remove it.
+                                    remove_label(
+                                        task, next_action_label, overview_task_ids, overview_task_labels)
 
                             elif dominant_type[1] == 'x' and dominant_type[2] == 'p':
-                                add_label(connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                                add_label(connection, task, dominant_type, next_action_label,
+                                          overview_task_ids, overview_task_labels)
 
                     # If a parentless or sub-task which has children
                     if len(child_tasks) > 0:
@@ -1181,7 +1222,8 @@ def autodoist_magic(args, api, connection):
                                     continue
 
                                 # Clean up for good measure.
-                                remove_label(child_task, next_action_label, overview_task_ids, overview_task_labels)
+                                remove_label(
+                                    child_task, next_action_label, overview_task_ids, overview_task_labels)
 
                                 # Pass task_type down to the children
                                 db_update_value(
@@ -1230,7 +1272,8 @@ def autodoist_magic(args, api, connection):
 
                     # If start-date has not passed yet, remove label
                     try:
-                        f1 = re.search('start=(\d{2}[-]\d{2}[-]\d{4})', task.content)
+                        f1 = re.search(
+                            'start=(\d{2}[-]\d{2}[-]\d{4})', task.content)
                         if f1:
                             start_date = f1.groups()[0]
                             start_date = datetime.strptime(
@@ -1252,8 +1295,9 @@ def autodoist_magic(args, api, connection):
                     # Recurring task friendly - remove label with relative change from due date
                     if task.due is not None:
                         try:
-                            f2 = re.search('start=due-(\d+)([dw])', task.content)
-                            
+                            f2 = re.search(
+                                'start=due-(\d+)([dw])', task.content)
+
                             if f2:
                                 offset = f2.groups()[0]
 
@@ -1264,12 +1308,14 @@ def autodoist_magic(args, api, connection):
 
                                 # Determine start-date
                                 try:
-                                    due_date = datetime.strptime(task.due.datetime, "%Y-%m-%dT%H:%M:%S")
+                                    due_date = datetime.strptime(
+                                        task.due.datetime, "%Y-%m-%dT%H:%M:%S")
                                 except:
-                                    due_date = datetime.strptime(task.due.date, "%Y-%m-%d")
+                                    due_date = datetime.strptime(
+                                        task.due.date, "%Y-%m-%d")
 
                                 start_date = due_date - td
-                                
+
                                 # If we're not in the offset from the due date yet, remove all labels
                                 future_diff = (
                                     datetime.today()-start_date).days
@@ -1278,7 +1324,7 @@ def autodoist_magic(args, api, connection):
                                     remove_label(
                                         task, next_action_label, overview_task_ids, overview_task_labels)
                                     [remove_label(child_task, next_action_label, overview_task_ids,
-                                                overview_task_labels) for child_task in child_tasks]
+                                                  overview_task_labels) for child_task in child_tasks]
                                     continue
 
                         except:
@@ -1287,11 +1333,13 @@ def autodoist_magic(args, api, connection):
                             continue
 
                 # Mark first found task in section
-                if next_action_label is not None and first_found[1] == False: #TODO: is this always true? What about starred tasks?
+                # TODO: is this always true? What about starred tasks?
+                if next_action_label is not None and first_found[1] == False:
                     first_found[1] = True
 
             # Mark first found section with tasks in project (to account for None section)
-            if next_action_label is not None and first_found[0] == False and section_tasks: #TODO: is this always true? What about starred tasks?
+            # TODO: is this always true? What about starred tasks?
+            if next_action_label is not None and first_found[0] == False and section_tasks:
                 first_found[0] = True
 
     # Return all ids and corresponding labels that need to be modified
