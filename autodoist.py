@@ -333,7 +333,7 @@ def initialise_api(args):
     # Check we have a API key
     if not args.api_key:
         logging.error(
-            "\n\nNo API key set. Run Autodoist with '-a <YOUR_API_KEY>'\n")
+            "\n\nNo API key set. Run Autodoist with '-a <YOUR_API_KEY>' or set the environment variable TODOIST_API_KEY.\n")
         sys.exit(1)
 
     # Check if alternative end of day is used
@@ -1356,8 +1356,8 @@ def main():
     # Main process functions.
     parser = argparse.ArgumentParser(
         formatter_class=make_wide(argparse.HelpFormatter, w=120, h=60))
-    parser.add_argument('-a', '--api_key',
-                        help='takes your Todoist API Key.', type=str)
+    parser.add_argument(
+        '-a', '--api_key', help='takes your Todoist API Key.', default=os.environ.get('TODOIST_API_KEY'), type=str)
     parser.add_argument(
         '-l', '--label', help='enable next action labelling. Define which label to use.', type=str)
     parser.add_argument(
