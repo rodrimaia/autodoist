@@ -964,8 +964,17 @@ def autodoist_magic(args, api, connection):
 
         # Reset
         first_found[0] = False
+        disable_section_labelling = 0
 
         for section in sections:
+
+            # Check if section labelling is disabled (useful for e.g. Kanban)
+            if next_action_label is not None:
+                try:
+                    if section.name.startswith('*') or section.name.endswith('*'):
+                        disable_section_labelling = 1
+                except:
+                    pass
 
             # Check db existance
             db_check_existance(connection, section)
@@ -1057,7 +1066,7 @@ def autodoist_magic(args, api, connection):
                         continue
 
                     # Remove clean all task and subtask data
-                    if task.content.startswith('*'):
+                    if task.content.startswith('*') or disable_section_labelling:
                         remove_label(task, next_action_label,
                                      overview_task_ids, overview_task_labels)
                         db_update_value(connection, task, 'task_type', None)
