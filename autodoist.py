@@ -295,7 +295,7 @@ def verify_label_existance(api, label_name, prompt_mode):
 
     if len(label) > 0:
         next_action_label = label[0].id
-        logging.debug('Label \'%s\' found as label id %d',
+        logging.debug('Label \'%s\' found as label id %s',
                       label_name, next_action_label)
     else:
         # Create a new label in Todoist
@@ -535,7 +535,7 @@ def get_project_type(args, connection, project):
 # Determine a section type
 
 
-def get_section_type(args, connection, section):
+def get_section_type(args, connection, section, project):
     """Identifies how a section should be handled."""
     if section is not None:
         section_type, section_type_changed = get_type(
@@ -545,22 +545,22 @@ def get_section_type(args, connection, section):
         section_type_changed = 0
 
     if section_type is not None:
-        logging.debug('Identified \'%s\' as %s type',
-                      section.name, section_type)
+        logging.debug("Identified '%s > %s' as %s type",
+                      project.name, section.name, section_type)
 
     return section_type, section_type_changed
 
 # Determine an task type
 
 
-def get_task_type(args, connection, task):
+def get_task_type(args, connection, task, section, project):
     """Identifies how a task with sub tasks should be handled."""
 
     task_type, task_type_changed = get_type(
         args, connection, task, 'task_type')
 
     if task_type is not None:
-        logging.debug('Identified \'%s\' as %s type', task.content, task_type)
+        logging.debug("Identified '%s > %s > %s' as %s type",project.name, section.name, task.content, task_type)
 
     return task_type, task_type_changed
 
@@ -977,7 +977,7 @@ def autodoist_magic(args, api, connection):
             # Get section type
             if next_action_label:
                 section_type, section_type_changed = get_section_type(
-                    args, connection, section)
+                    args, connection, section, project)
             else:
                 section_type = None
                 section_type_changed = 0
@@ -1080,7 +1080,7 @@ def autodoist_magic(args, api, connection):
 
                     # Check task type
                     task_type, task_type_changed = get_task_type(
-                        args, connection, task)
+                        args, connection, task, section, project)
 
                     # If task type has changed, clean all of its children for good measure
                     if next_action_label is not None:
