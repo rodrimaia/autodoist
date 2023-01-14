@@ -19,6 +19,7 @@ import sqlite3
 import os
 import re
 import json
+from collections import defaultdict
 
 
 # Connect to SQLite database
@@ -28,7 +29,7 @@ def create_connection(path):
     connection = None
     try:
         connection = sqlite3.connect(path)
-        logging.info("Connection to SQLite DB successful")
+        logging.debug("Connection to SQLite DB successful!")
     except Exception as e:
         logging.error(
             f"Could not connect to the SQLite database: the error '{e}' occurred")
@@ -223,6 +224,8 @@ def initialise_sqlite():
     execute_query(connection, q_create_sections_table)
     execute_query(connection, q_create_tasks_table)
 
+    logging.info("SQLite DB has successfully initialized! \n")
+
     return connection
 
 
@@ -370,7 +373,7 @@ def initialise_api(args):
         api_arguments['cache'] = None
 
     api = TodoistAPI(**api_arguments)
-    logging.info("Autodoist has successfully connected to Todoist!\n")
+    logging.info("Autodoist has successfully connected to Todoist!")
 
     sync_api = initialise_sync_api(api)
     api.sync_token = sync_api['sync_token'] # Save SYNC API token to enable partial syncs
@@ -976,9 +979,24 @@ def autodoist_magic(args, api, connection):
     api.queue = []
     api.overview_updated_ids = []
 
-    # Get all projects info
+    # Get all todoist info
     try:
-        projects = api.get_projects()
+        projects = api.get_projects() # To save on request to stay under the limit
+        # all_sections = api.get_sections() # To save on request to stay under the limit
+        all_tasks = api.get_tasks()
+
+        # Build a dict of all project and task numbers
+        all_projects = [x.project_id for x in all_tasks]
+        all_sections = [x.section_id for x in all_tasks]
+        h = defaultdict(list)
+        for k, v in zip(all_projects, all_sections):
+            h[k].append(v)
+        dict_project_section = dict(h)
+
+        # Store only unique values:
+        for key in dict_project_section:
+            dict_project_section[key] = list(set(dict_project_section[key]))
+
     except Exception as error:
         print(error)
 
@@ -1005,7 +1023,7 @@ def autodoist_magic(args, api, connection):
 
         # Get all tasks for the project
         try:
-            project_tasks = api.get_tasks(project_id=project.id)
+            project_tasks = api.get_tasks(project_id=project.id)  # TODO: call them all once, and use filter here instead.
         except Exception as error:
             print(error)
 
@@ -1036,7 +1054,7 @@ def autodoist_magic(args, api, connection):
 
         # Get all sections and add the 'None' section too.
         try:
-            sections = api.get_sections(project_id=project.id)
+            sections = api.get_sections(project_id=project.id) # TODO: call them all once, and use filter here instead.
             sections.insert(0, Section(None, None, 0, project.id))
         except Exception as error:
             print(error)
