@@ -981,26 +981,14 @@ def autodoist_magic(args, api, connection):
 
     # Get all todoist info
     try:
-        projects = api.get_projects() # To save on request to stay under the limit
-        # all_sections = api.get_sections() # To save on request to stay under the limit
+        all_projects = api.get_projects() # To save on request to stay under the limit
+        all_sections = api.get_sections() # To save on request to stay under the limit
         all_tasks = api.get_tasks()
-
-        # Build a dict of all project and task numbers
-        all_projects = [x.project_id for x in all_tasks]
-        all_sections = [x.section_id for x in all_tasks]
-        h = defaultdict(list)
-        for k, v in zip(all_projects, all_sections):
-            h[k].append(v)
-        dict_project_section = dict(h)
-
-        # Store only unique values:
-        for key in dict_project_section:
-            dict_project_section[key] = list(set(dict_project_section[key]))
 
     except Exception as error:
         print(error)
 
-    for project in projects:
+    for project in all_projects:
 
         # Skip processing inbox as intended feature
         if project.is_inbox_project:
@@ -1023,7 +1011,7 @@ def autodoist_magic(args, api, connection):
 
         # Get all tasks for the project
         try:
-            project_tasks = api.get_tasks(project_id=project.id)  # TODO: call them all once, and use filter here instead.
+            project_tasks = [t for t in all_tasks if t.project_id == project.id]
         except Exception as error:
             print(error)
 
@@ -1054,7 +1042,7 @@ def autodoist_magic(args, api, connection):
 
         # Get all sections and add the 'None' section too.
         try:
-            sections = api.get_sections(project_id=project.id) # TODO: call them all once, and use filter here instead.
+            sections = [s for s in all_sections if s.project_id == project.id]
             sections.insert(0, Section(None, None, 0, project.id))
         except Exception as error:
             print(error)
