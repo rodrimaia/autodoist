@@ -444,8 +444,11 @@ def initialise_sync_api(api):
     }
     data = 'sync_token=*&resource_types=["all"]'
 
-    response = requests.post(
-        'https://api.todoist.com/sync/v9/sync', headers=headers, data=data)
+    try:
+        response = requests.post(
+            'https://api.todoist.com/sync/v9/sync', headers=headers, data=data)
+    except Exception as e:
+        logging.error(f"Error during initialise_sync_api: '{e}'")
 
     return json.loads(response.text)
 
