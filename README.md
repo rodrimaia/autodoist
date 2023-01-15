@@ -4,10 +4,10 @@
 
 This program adds four major functionalities to Todoist to help automate your workflow:
 
-1) Assign automatic next-action labels for a more GTD-like workflow
+1) Assign automatic `@next_action` labels for a more GTD-like workflow
    - Flexible options to label tasks sequentially or in parallel
    - Limit labels based on a start-date or hide future tasks based on the due date
-2) Enable regeneration of sub-tasks in lists with a recurring date. Multiple modes possile.
+2) [Temporary disabled] Enable regeneration of sub-tasks in lists with a recurring date. Multiple modes possible.
 3) Postpone the end-of-day time to after midnight to finish your daily recurring tasks
 4) Make multiple tasks (un)checkable at the same time
 
@@ -19,7 +19,7 @@ If this tool helped you out, I would really appreciate your support by providing
 
 # Requirements
 
-Autodoist has been build with Python 3.9.1, which is the recommended version. Older versions of 3.x should be compatible, however be aware that they have not been tested.
+Autodoist has been build with Python 3.11.1, which is the recommended version. Older versions of 3.x should be compatible, however be aware that they have not been tested.
 
 To run Autodoist the following packages are required:
 * ```todoist-python```
@@ -33,19 +33,19 @@ For your convenience a requirements.txt is provided, which allows you to install
 
 The program looks for pre-defined tags in the name of every project, section, or parentless tasks in your Todoist account to automatically add and remove `@next_action` labels.
 
-Projects, sections, and parentless tasks can be tagged independently from each other to create the required functionality. If this tag is not defined, it will not activate this functionality. The result will be a clear, current and comprehensive list of next actions without the need for further thought.
+Projects, sections, and parentless tasks can be tagged independently of each other to create the required functionality. If this tag is not defined, it will not activate this functionality. The result will be a clear, current and comprehensive list of next actions without the need for further thought.
 
 See the example given at [running Autodoist](#running-autodoist) on how to run this mode. If the label does not exist yet in your Todoist, a possibility is given to automatically create it.
 
 ## Useful filter tip
 
-For a more GTD-like workflow, you can use Todoist filters to create a clean and cohesive list that only contains your actionable tasks. As a simple example you could use the following filter:
+For a more GTD-like workflow, you can use Todoist filters to create a clean and cohesive list that only contains your actionable tasks. As a simple example, you could use the following filter:
 
 `@next_action & #PROJECT_NAME`
 
 ## Sequential processing
 
-If a project, section, or parentless task ends with a dash `-`, the tasks will be treated suquentially in a priority queue, where only the first task that is found is labeled. If a task contains sub-tasks, the first lowest task is labeled instead.
+If a project, section, or parentless task ends with a dash `-`, the tasks will be treated sequentially in a priority queue, where only the first task that is found is labeled. If a task contains sub-tasks, the first lowest task is labeled instead.
 
 ![Sequential task labeling](https://i.imgur.com/ZUKbA8E.gif)
 
@@ -61,9 +61,9 @@ Projects, sections, and (parentless) tasks can be used to specify how the levels
 
 - A project can accept up to three tags, to specify how the sections, parentless tasks, and subtasks should behave.
 - A section can accept up to two tags, to specify parentless tasks and subtasks should behave.
-- A task at any level can be labelled with one tag, to specifcy how its sub-tasks should behave.
+- A task at any level can be labelled with one tag, to specify how its sub-tasks should behave.
 
-Tags can be applied one each level simultaneously , where the lower level setting will always override the one specified in the levels above.
+Tags can be applied on each level simultaneously, where the lower level setting will always override the one specified in the levels above.
 
 ### Shorthand notation
 
@@ -90,7 +90,7 @@ If fewer tags then needed are specified, the last one is simply copied. E.g. if 
 - If a task ends with `=`, the sub-tasks are handled in parallel.
 
 ### Kanban board labeling
-A standard workflow for Kanban boards is to have one actionable task per column/section, which is then moved to the next column when needed. Most often the most right column is the 'done' section. To ensure that every column only has one labelled task and the last column contains no labelled tasks, you could do either of two things:
+A standard workflow for Kanban boards is to have one actionable task per column/section, which is then moved to the next column when needed. Most often, the most right column is the 'done' section. To ensure that every column only has one labelled task and the last column contains no labelled tasks, you could do either of two things:
 - Add the `=--` tag to the project name, and disable labelling for the 'done' section by adding `*` to either the start or end of the section name.
 - Add the `--` tag to every section that you want to have labels.
 
@@ -99,7 +99,7 @@ A standard workflow for Kanban boards is to have one actionable task per column/
 
 Two methods are provided to hide tasks that are not relevant yet.
 
-- Prevent labels by defining a start-date that is added to the task itself. The label is only assigned if this date is reached. You can define the start-date by adding 'start=DD-MM-YYYY'. On the other hand the start date can be defined as several days or weeks before the due-date by using either 'start=due-<NUMBER_OF_DAYS>d' or 'start=due-<NUMBER_OF_WEEKS>w'. This is especially useful for recurring tasks!
+- Prevent labels by defining a start-date that is added to the task itself. The label is only assigned if this date is reached. You can define the start-date by adding 'start=DD-MM-YYYY'. On the other hand, the start date can be defined as several days or weeks before the due-date by using either 'start=due-<NUMBER_OF_DAYS>d' or 'start=due-<NUMBER_OF_WEEKS>w'. This is especially useful for recurring tasks!
    [See an example of using start-dates](https://i.imgur.com/WJRoJzW.png).
 
 - Prevent labels of all tasks if the due date is too far in the future. Define the amount by running with the argument '-hf <NUMBER_OF_DAYS>'.
@@ -124,11 +124,11 @@ To give you more flexibility, multiple modes are provided:
 
 When this functionality is activated, it is possible to chose which mode is used as overall functionality for your Todoist. See the example given at [running Autodoist](#running-autodoist).
 
-In addition you can override the overall mode by adding the labels `Regen_off`, `Regen_all`, or `Regen_all_if_completed` to one of your main recurrings task. These labels will automatically be created for you.
+In addition you can override the overall mode by adding the labels `Regen_off`, `Regen_all`, or `Regen_all_if_completed` to one of your main recurring task. These labels will automatically be created for you.
 
 # 3. Postpone the end-of-day
 
-You have a daily recurring task, but you're up working late and now it's past midnight. When this happens Todoist will automatically mark it overdue, and when checked by you it moves to tomorrow. This means that after a good nights rest you can't complete the task that day!
+You have a daily recurring task, but you're up working late and now it's past midnight. When this happens, Todoist will automatically mark it overdue and when checked by you it moves to tomorrow. This means that after a good night's rest you can't complete the task that day!
 
 By setting an alternative time for the end-of-day you can now finish your work after midnight and the new date will automatically be corrected for you.
 
@@ -152,7 +152,7 @@ If you want to enable labelling mode, run with the `-l` argument:
 
     python autodoist.py -a <API Key> -l <LABEL_NAME>
     
-If you want to enable regeneration of sub-tasks in recurring lists, run with the `-r` argument followed by a mode number for the overall functionality (1: no regeneration, 2: regenerate all, 3: regenerate ony if all sub-tasks are completed):
+If you want to enable regeneration of sub-tasks in recurring lists, run with the `-r` argument followed by a mode number for the overall functionality (1: no regeneration, 2: regenerate all, 3: regenerate only if all sub-tasks are completed):
 
     python autodoist.py -a <API Key> -r <NUMBER>
     
