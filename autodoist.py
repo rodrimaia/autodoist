@@ -5,7 +5,6 @@ from todoist_api_python.models import Task
 from todoist_api_python.models import Section
 from todoist_api_python.models import Project
 from todoist_api_python.http_requests import get
-from todoist_api_python.http_requests import post
 from urllib.parse import urljoin
 from urllib.parse import quote
 import sys
@@ -19,8 +18,6 @@ import sqlite3
 import os
 import re
 import json
-from collections import defaultdict
-
 
 # Connect to SQLite database
 
@@ -365,18 +362,13 @@ def initialise_api(args):
 
     # Run the initial sync
     logging.debug('Connecting to the Todoist API')
-
     api_arguments = {'token': args.api_key}
-
-    if args.nocache:
-        logging.debug('Disabling local caching')
-        api_arguments['cache'] = None
-
     api = TodoistAPI(**api_arguments)
     logging.info("Autodoist has successfully connected to Todoist!")
 
     sync_api = initialise_sync_api(api)
-    api.sync_token = sync_api['sync_token'] # Save SYNC API token to enable partial syncs
+    # Save SYNC API token to enable partial syncs
+    api.sync_token = sync_api['sync_token']
 
     # Check if labels exist
 
@@ -452,7 +444,8 @@ def initialise_sync_api(api):
     }
     data = 'sync_token=*&resource_types=["all"]'
 
-    response = requests.post('https://api.todoist.com/sync/v9/sync', headers=headers, data=data)
+    response = requests.post(
+        'https://api.todoist.com/sync/v9/sync', headers=headers, data=data)
 
     return json.loads(response.text)
 
@@ -507,7 +500,8 @@ def sync(api):
             'Content-Type': 'application/x-www-form-urlencoded',
         }
 
-        data = 'sync_token=' + api.sync_token + '&commands=' + json.dumps(api.queue)
+        data = 'sync_token=' + api.sync_token + \
+            '&commands=' + json.dumps(api.queue)
 
         response = requests.post(
             'https://api.todoist.com/sync/v9/sync', headers=headers, data=data)
@@ -646,7 +640,7 @@ def get_task_type(args, connection, task, section, project):
 # Logic to track addition of a label to a task
 
 
-def add_label(connection, task, dominant_type, label, overview_task_ids, overview_task_labels):
+def add_label(task, label, overview_task_ids, overview_task_labels):
     if label not in task.labels:
         labels = task.labels  # To also copy other existing labels
         logging.debug('Updating \'%s\' with label', task.content)
@@ -981,8 +975,8 @@ def autodoist_magic(args, api, connection):
 
     # Get all todoist info
     try:
-        all_projects = api.get_projects() # To save on request to stay under the limit
-        all_sections = api.get_sections() # To save on request to stay under the limit
+        all_projects = api.get_projects()  # To save on request to stay under the limit
+        all_sections = api.get_sections()  # To save on request to stay under the limit
         all_tasks = api.get_tasks()
 
     except Exception as error:
@@ -1011,7 +1005,8 @@ def autodoist_magic(args, api, connection):
 
         # Get all tasks for the project
         try:
-            project_tasks = [t for t in all_tasks if t.project_id == project.id]
+            project_tasks = [
+                t for t in all_tasks if t.project_id == project.id]
         except Exception as error:
             print(error)
 
@@ -1025,12 +1020,6 @@ def autodoist_magic(args, api, connection):
                     db_update_value(connection, task, 'parent_type', None)
 
         # Run for both non-sectioned and sectioned tasks
-
-        # Get completed tasks:
-        # endpoint = 'https://api.todoist.com/sync/v9/completed/get_all'
-        # get(api._session, endpoint, api._token, '0')['items']
-        # $ curl https://api.todoist.com/sync/v9/sync-H "Authorization: Bearer e2f750b64e8fc06ae14383d5e15ea0792a2c1bf3" -d commands='[ {"type": "item_add", "temp_id": "63f7ed23-a038-46b5-b2c9-4abda9097ffa", "uuid": "997d4b43-55f1-48a9-9e66-de5785dfd69b", "args": {"content": "Buy Milk", "project_id": "2203306141","labels": ["Food", "Shopping"]}}]'
-
         # for s in [0,1]:
         #     if s == 0:
         #         sections = Section(None, None, 0, project.id)
@@ -1223,6 +1212,7 @@ def autodoist_magic(args, api, connection):
                                 # Inherit project type
                                 dominant_type = project_type
 
+                            # TODO: optimise below code
                             # If indicated on project level
                             if dominant_type[0] == 's':
                                 if not first_found[0]:
@@ -1230,7 +1220,7 @@ def autodoist_magic(args, api, connection):
                                     if dominant_type[1] == 's':
                                         if not first_found[1]:
                                             add_label(
-                                                connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                                                task, next_action_label, overview_task_ids, overview_task_labels)
 
                                         elif next_action_label in task.labels:
                                             # Probably the task has been manually moved, so if it has a label, let's remove it.
@@ -1239,14 +1229,14 @@ def autodoist_magic(args, api, connection):
 
                                     elif dominant_type[1] == 'p':
                                         add_label(
-                                            connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                                            task, next_action_label, overview_task_ids, overview_task_labels)
 
                             elif dominant_type[0] == 'p':
 
                                 if dominant_type[1] == 's':
                                     if not first_found[1]:
                                         add_label(
-                                            connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                                            task, next_action_label, overview_task_ids, overview_task_labels)
 
                                     elif next_action_label in task.labels:
                                         # Probably the task has been manually moved, so if it has a label, let's remove it.
@@ -1255,13 +1245,13 @@ def autodoist_magic(args, api, connection):
 
                                 elif dominant_type[1] == 'p':
                                     add_label(
-                                        connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                                        task, next_action_label, overview_task_ids, overview_task_labels)
 
                             # If indicated on section level
                             if dominant_type[0] == 'x' and dominant_type[1] == 's':
                                 if not first_found[1]:
                                     add_label(
-                                        connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                                        task, next_action_label, overview_task_ids, overview_task_labels)
 
                                 elif next_action_label in task.labels:
                                     # Probably the task has been manually moved, so if it has a label, let's remove it.
@@ -1269,14 +1259,14 @@ def autodoist_magic(args, api, connection):
                                         task, next_action_label, overview_task_ids, overview_task_labels)
 
                             elif dominant_type[0] == 'x' and dominant_type[1] == 'p':
-                                add_label(connection, task, dominant_type, next_action_label,
+                                add_label(task, next_action_label,
                                           overview_task_ids, overview_task_labels)
 
                             # If indicated on parentless task level
                             if dominant_type[1] == 'x' and dominant_type[2] == 's':
                                 if not first_found[1]:
                                     add_label(
-                                        connection, task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                                        task, next_action_label, overview_task_ids, overview_task_labels)
 
                                 if next_action_label in task.labels:
                                     # Probably the task has been manually moved, so if it has a label, let's remove it.
@@ -1284,7 +1274,7 @@ def autodoist_magic(args, api, connection):
                                         task, next_action_label, overview_task_ids, overview_task_labels)
 
                             elif dominant_type[1] == 'x' and dominant_type[2] == 'p':
-                                add_label(connection, task, dominant_type, next_action_label,
+                                add_label(task, next_action_label,
                                           overview_task_ids, overview_task_labels)
 
                     # If a parentless or sub-task which has children
@@ -1326,7 +1316,7 @@ def autodoist_magic(args, api, connection):
                                 # Pass label down to the first child
                                 if not child_task.is_completed and next_action_label in task.labels:
                                     add_label(
-                                        connection, child_task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                                        child_task, next_action_label, overview_task_ids, overview_task_labels)
                                     remove_label(
                                         task, next_action_label, overview_task_ids, overview_task_labels)
 
@@ -1346,7 +1336,7 @@ def autodoist_magic(args, api, connection):
 
                                 if not child_task.is_completed:
                                     add_label(
-                                        connection, child_task, dominant_type, next_action_label, overview_task_ids, overview_task_labels)
+                                        child_task, next_action_label, overview_task_ids, overview_task_labels)
 
                     # Remove labels based on start / due dates
 
@@ -1432,7 +1422,6 @@ def autodoist_magic(args, api, connection):
                     first_found[1] = True
 
             # Mark first found section with tasks in project (to account for None section)
-            # TODO: is this always true? What about starred tasks?
             if next_action_label is not None and first_found[0] == False and section_tasks:
                 first_found[0] = True
 
@@ -1455,7 +1444,7 @@ def main():
     parser.add_argument(
         '-l', '--label', help='enable next action labelling. Define which label to use.', type=str)
     parser.add_argument(
-        '-r', '--regeneration', help='enable regeneration of sub-tasks in recurring lists. Chose overall mode: 0 - regen off, 1 - regen all (default),  2 - regen only if all sub-tasks are completed. Task labels can be used to overwrite this mode.', nargs='?', const='1', default=None, type=int)
+        '-r', '--regeneration', help='[CURRENTLY DISABLED FEATURE] enable regeneration of sub-tasks in recurring lists. Chose overall mode: 0 - regen off, 1 - regen all (default),  2 - regen only if all sub-tasks are completed. Task labels can be used to overwrite this mode.', nargs='?', const='1', default=None, type=int)
     parser.add_argument(
         '-e', '--end', help='enable alternative end-of-day time instead of default midnight. Enter a number from 1 to 24 to define which hour is used.', type=int)
     parser.add_argument(
@@ -1465,13 +1454,11 @@ def main():
     parser.add_argument(
         '-s', '--s_suffix', help='change suffix for sequential labeling (default "-").', default='-')
     parser.add_argument(
-        '-df', '--dateformat', help='strptime() format of starting date (default "%%d-%%m-%%Y").', default='%d-%m-%Y')
+        '-df', '--dateformat', help='[CURRENTLY DISABLED FEATURE] strptime() format of starting date (default "%%d-%%m-%%Y").', default='%d-%m-%Y')
     parser.add_argument(
         '-hf', '--hide_future', help='prevent labelling of future tasks beyond a specified number of days.', default=0, type=int)
     parser.add_argument(
         '--onetime', help='update Todoist once and exit.', action='store_true')
-    parser.add_argument(
-        '--nocache', help='disables caching data to disk for quicker syncing.', action='store_true')
     parser.add_argument('--debug', help='enable debugging and store detailed to a log file.',
                         action='store_true')
     parser.add_argument('--inbox', help='the method the Inbox should be processed with.',
@@ -1492,6 +1479,7 @@ def main():
     else:
         log_level = logging.INFO
 
+    # Set logging config settings
     logging.basicConfig(level=log_level,
                         format='%(asctime)s %(levelname)-8s %(message)s',
                         datefmt='%Y-%m-%d %H:%M:%S',
