@@ -90,7 +90,7 @@ If fewer tags then needed are specified, the last one is simply copied. E.g. if 
 - If a task ends with `=`, the sub-tasks are handled in parallel.
 
 ### Kanban board labeling
-A standard workflow for Kanban boards is to have one actionable task per column/section, which is then moved to the next column when needed. Most often the most right column is the 'done' section. To ensure that every column only has one labelled task and the last column has contains no labelled tasks, you could do either of two things:
+A standard workflow for Kanban boards is to have one actionable task per column/section, which is then moved to the next column when needed. Most often the most right column is the 'done' section. To ensure that every column only has one labelled task and the last column contains no labelled tasks, you could do either of two things:
 - Add the `=--` tag to the project name, and disable labelling for the 'done' section by adding `*` to either the start or end of the section name.
 - Add the `--` tag to every section that you want to have labels.
 
