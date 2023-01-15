@@ -362,13 +362,19 @@ def initialise_api(args):
 
     # Run the initial sync
     logging.debug('Connecting to the Todoist API')
-    api_arguments = {'token': args.api_key}
-    api = TodoistAPI(**api_arguments)
-    logging.info("Autodoist has successfully connected to Todoist!")
+    try:
+        api_arguments = {'token': args.api_key}
+        api = TodoistAPI(**api_arguments)
+        sync_api = initialise_sync_api(api)
+        # Save SYNC API token to enable partial syncs
+        api.sync_token = sync_api['sync_token']
+    
+    except Exception as e:
+        logging.error(
+            f"Could not connect to Todoist: '{e}'")
+        exit(0)
 
-    sync_api = initialise_sync_api(api)
-    # Save SYNC API token to enable partial syncs
-    api.sync_token = sync_api['sync_token']
+    logging.info("Autodoist has successfully connected to Todoist!")
 
     # Check if labels exist
 
