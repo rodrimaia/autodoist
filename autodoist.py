@@ -1523,7 +1523,8 @@ def main():
                                        overview_task_labels)
 
         # Sync all queued up changes
-        sync(api)
+        if api.queue:
+            sync(api)
 
         num_changes = len(api.queue)+len(api.overview_updated_ids)
 
