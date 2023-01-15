@@ -109,7 +109,7 @@ Two methods are provided to hide tasks that are not relevant yet.
 
 *DISCLAIMER: This feature has been disabled for now due to two reasons:*
 - *Regeneration is a [core feature of Todoist nowadays](https://todoist.com/help/articles/can-i-reset-sub-tasks). This was made possible thanks to all of you who are using and supporting Autodoist, which resulted in Doist to include this too! Thank you all for making this happen!*
-- *Due to the change in the REST API v2.0 it's not possible to see completed tasks, which makes regeneration a bit difficult.*
+- *In the new REST API v2 it's currently not possible to see completed tasks, which makes regeneration a bit difficult.*
 
 *Nevertheless, the Todoist implementation is still more limited than Autodoist, it does not restore the original order of the sub-tasks, and deeper sub-tasks can't be reset. I therefore believe it is still useful for this feature to be re-enabled in the near future.*
 
