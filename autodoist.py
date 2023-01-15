@@ -368,7 +368,7 @@ def initialise_api(args):
         sync_api = initialise_sync_api(api)
         # Save SYNC API token to enable partial syncs
         api.sync_token = sync_api['sync_token']
-    
+
     except Exception as e:
         logging.error(
             f"Could not connect to Todoist: '{e}'")
