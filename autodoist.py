@@ -303,7 +303,7 @@ def verify_label_existance(api, label_name, prompt_mode):
             try:
                 api.add_label(name=label_name)
             except Exception as error:
-                print(error)
+                logging.warning(error)
 
             labels = api.get_labels()
             label = [x for x in labels if x.name == label_name]
@@ -980,7 +980,7 @@ def autodoist_magic(args, api, connection):
         all_tasks = api.get_tasks()
 
     except Exception as error:
-        print(error)
+        logging.error(error)
 
     for project in all_projects:
 
@@ -1008,7 +1008,7 @@ def autodoist_magic(args, api, connection):
             project_tasks = [
                 t for t in all_tasks if t.project_id == project.id]
         except Exception as error:
-            print(error)
+            logging.warning(error)
 
         # If a project type has changed, clean all tasks in this project for good measure
         if next_action_label is not None:
@@ -1034,7 +1034,7 @@ def autodoist_magic(args, api, connection):
             sections = [s for s in all_sections if s.project_id == project.id]
             sections.insert(0, Section(None, None, 0, project.id))
         except Exception as error:
-            print(error)
+            logging.debug(error)
 
         # Reset
         first_found[0] = False
@@ -1434,7 +1434,7 @@ def autodoist_magic(args, api, connection):
 def main():
 
     # Version
-    current_version = 'v1.5'
+    current_version = 'v2.0'
 
     # Main process functions.
     parser = argparse.ArgumentParser(
