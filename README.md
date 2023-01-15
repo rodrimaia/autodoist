@@ -43,14 +43,14 @@ For a more GTD-like workflow, you can use Todoist filters to create a clean and 
 
 ## Sequential processing
 
-If a project, section, or parentless task ends with `-`, the tasks will be treated as a priority queue, where only the first task that is found is labeled. If a task contains sub-tasks, the first lowest task is labeled instead.
+If a project, section, or parentless task ends with a dash `-`, the tasks will be treated suquentially in a priority queue, where only the first task that is found is labeled. If a task contains sub-tasks, the first lowest task is labeled instead.
 
 [UPDATE FIGURE]
 ![Serial task](https://i.imgur.com/SUkhPiE.gif)
 
 ## Parallel processing
 
-If a project, section, or parentless task name ends with `=`, all tasks will be treated in parallel. A waterfall processing is applied, where the lowest possible (sub-)tasks are labelled.
+If a project, section, or parentless task name ends with an equal sign `=`, all tasks will be treated in parallel. A waterfall processing is applied, where the lowest possible (sub-)tasks are labelled.
 
 [UPDATE FIGURE]
 ![Parallel task](https://i.imgur.com/NPTLQ8B.gif)
