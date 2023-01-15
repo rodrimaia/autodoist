@@ -1,5 +1,7 @@
 # Autodoist
 
+*Note: v2.0 is a major overhaul of Autodoist, so please be sure to view the README in order to get up to speed with the latest changes. Thanks to everyone for helping out and supporting this project!*
+
 This program adds four major functionalities to Todoist to help automate your workflow:
 
 1) Assign automatic next-action labels for a more GTD-like workflow
@@ -45,15 +47,13 @@ For a more GTD-like workflow, you can use Todoist filters to create a clean and 
 
 If a project, section, or parentless task ends with a dash `-`, the tasks will be treated suquentially in a priority queue, where only the first task that is found is labeled. If a task contains sub-tasks, the first lowest task is labeled instead.
 
-[UPDATE FIGURE]
-![Serial task](https://i.imgur.com/SUkhPiE.gif)
+![Sequential task labeling](https://i.imgur.com/ZUKbA8E.gif)
 
 ## Parallel processing
 
 If a project, section, or parentless task name ends with an equal sign `=`, all tasks will be treated in parallel. A waterfall processing is applied, where the lowest possible (sub-)tasks are labelled.
 
-[UPDATE FIGURE]
-![Parallel task](https://i.imgur.com/NPTLQ8B.gif)
+![Parallel task labeling](https://i.imgur.com/xZZ0kEM.gif)
 
 ## Advanced labelling
 
