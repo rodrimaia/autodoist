@@ -179,6 +179,10 @@ If you want to apply labels to all projects, regardless of whether they have a s
 
     python autodoist.py --all_projects
 
+If you want to exclude projects with suffix "_ignore" when using --all_projects:
+
+    python autodoist.py --all_projects --ignore_suffix
+
 In addition, if you experience issues with syncing you can increase the api syncing time (default 5 seconds):
     
     python autodoist.py --delay <time in seconds>

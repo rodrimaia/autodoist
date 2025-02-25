@@ -544,9 +544,27 @@ def check_name(args, string, num):
             regex = '[%s%s]{1,%s}$' % (args.s_suffix, args.p_suffix, str(num))
             re_ind = re.search(regex, string)
             
+            # Check if this project should be excluded based on ignore_suffix
+            if args.all_projects and num == 3 and args.ignore_suffix and string.endswith("_ignore"):
+                # Project has the ignore suffix, so don't apply the all_projects logic
+                if re_ind:
+                    suffix = re_ind[0]
+                    
+                    # Somebody put fewer characters than intended. Take last character and apply for every missing one.
+                    if len(suffix) < num:
+                        suffix += suffix[-1] * (num - len(suffix))
+                    
+                    current_type = ''
+                    for s in suffix:
+                        if s == args.s_suffix:
+                            current_type += 's'
+                        elif s == args.p_suffix:
+                            current_type += 'p'
+                else:
+                    current_type = None
             # If all_projects is enabled and we're checking a project (num=3), and no suffix is found,
             # treat it as sequential by default
-            if args.all_projects and num == 3 and not re_ind:
+            elif args.all_projects and num == 3 and not re_ind:
                 current_type = 's' * num
             else:
                 # Process normally if suffix is found or all_projects is not enabled
@@ -1263,8 +1281,8 @@ def autodoist_magic(args, api, connection):
                                             task, next_action_label, overview_task_ids, overview_task_labels)
 
                                 elif dominant_type[1] == 'p':
-                                    add_label(
-                                        task, next_action_label, overview_task_ids, overview_task_labels)
+                                    add_label(task, next_action_label,
+                                              overview_task_ids, overview_task_labels)
 
                             # If indicated on section level
                             if dominant_type[0] == 'x' and dominant_type[1] == 's':
@@ -1483,6 +1501,8 @@ def main():
     parser.add_argument('--inbox', help='the method the Inbox should be processed with.',
                         default=None, choices=['parallel', 'sequential'])
     parser.add_argument('--all_projects', help='apply label to all projects, regardless of suffix.',
+                        action='store_true')
+    parser.add_argument('--ignore_suffix', help='exclude projects with suffix "_ignore" when all_projects is enabled.',
                         action='store_true')
 
     args = parser.parse_args()
