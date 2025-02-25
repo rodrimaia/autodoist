@@ -543,23 +543,33 @@ def check_name(args, string, num):
             # Find any = or - symbol at the end of the string. Look at last 3 for projects, 2 for sections, and 1 for tasks
             regex = '[%s%s]{1,%s}$' % (args.s_suffix, args.p_suffix, str(num))
             re_ind = re.search(regex, string)
-            suffix = re_ind[0]
-
-            # Somebody put fewer characters than intended. Take last character and apply for every missing one.
-            if len(suffix) < num:
-                suffix += suffix[-1] * (num - len(suffix))
-
-            current_type = ''
-            for s in suffix:
-                if s == args.s_suffix:
-                    current_type += 's'
-                elif s == args.p_suffix:
-                    current_type += 'p'
+            
+            # If all_projects is enabled and we're checking a project (num=3), and no suffix is found,
+            # treat it as sequential by default
+            if args.all_projects and num == 3 and not re_ind:
+                current_type = 's' * num
+            else:
+                # Process normally if suffix is found or all_projects is not enabled
+                if re_ind:
+                    suffix = re_ind[0]
+                    
+                    # Somebody put fewer characters than intended. Take last character and apply for every missing one.
+                    if len(suffix) < num:
+                        suffix += suffix[-1] * (num - len(suffix))
+                    
+                    current_type = ''
+                    for s in suffix:
+                        if s == args.s_suffix:
+                            current_type += 's'
+                        elif s == args.p_suffix:
+                            current_type += 'p'
+                else:
+                    current_type = None
 
         # Always return a three letter string
-        if len(current_type) == 2:
+        if current_type and len(current_type) == 2:
             current_type = 'x' + current_type
-        elif len(current_type) == 1:
+        elif current_type and len(current_type) == 1:
             current_type = 'xx' + current_type
 
     except:
@@ -1472,6 +1482,8 @@ def main():
                         action='store_true')
     parser.add_argument('--inbox', help='the method the Inbox should be processed with.',
                         default=None, choices=['parallel', 'sequential'])
+    parser.add_argument('--all_projects', help='apply label to all projects, regardless of suffix.',
+                        action='store_true')
 
     args = parser.parse_args()
 

@@ -175,6 +175,10 @@ If you want to hide all tasks due in the future:
 
     python autodoist.py --hf <NUMBER_OF_DAYS>
 
+If you want to apply labels to all projects, regardless of whether they have a suffix or not:
+
+    python autodoist.py --all_projects
+
 In addition, if you experience issues with syncing you can increase the api syncing time (default 5 seconds):
     
     python autodoist.py --delay <time in seconds>
