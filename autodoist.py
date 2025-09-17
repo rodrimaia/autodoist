@@ -1586,6 +1586,9 @@ def main():
         else:
             logging.info('No changes in queue, skipping sync.')
 
+        # Call status URL for monitoring
+        call_status_url(args.status_url)
+
         # If onetime is set, exit after first execution.
         if args.onetime:
             break
@@ -1604,6 +1607,7 @@ def main():
 
         # Call status URL for monitoring (after each loop iteration)
         call_status_url(args.status_url)
+
 
 
 if __name__ == '__main__':
