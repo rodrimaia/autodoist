@@ -187,6 +187,12 @@ In addition, if you experience issues with syncing you can increase the api sync
     
     python autodoist.py --delay <time in seconds>
 
+For monitoring purposes, you can specify a URL that will be called after each sync loop iteration to verify autodoist is running:
+
+    python autodoist.py --status_url <monitoring_url>
+
+This will make a GET request to the specified URL every loop iteration (default every 5 seconds), regardless of whether there were changes to sync. This helps detect when the autodoist process has stopped or crashed.
+
 For all arguments, please check out the help:
 
     python autodoist.py --help

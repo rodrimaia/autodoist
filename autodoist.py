@@ -489,6 +489,23 @@ def commit_labels_update(api, overview_task_ids, overview_task_labels):
     return api
 
 
+# Call status URL for monitoring
+
+
+def call_status_url(url):
+    """Call status URL for monitoring purposes."""
+    if not url:
+        return
+    
+    try:
+        response = requests.get(url, timeout=10)
+        logging.debug(f'Status URL called successfully: {url} (status: {response.status_code})')
+    except requests.exceptions.RequestException as e:
+        logging.warning(f'Failed to call status URL {url}: {e}')
+    except Exception as e:
+        logging.warning(f'Unexpected error calling status URL {url}: {e}')
+
+
 # Update tasks in batch with Todoist Sync API
 
 
@@ -1504,6 +1521,8 @@ def main():
                         action='store_true')
     parser.add_argument('--ignore_suffix', help='exclude projects with suffix "_ignore" when all_projects is enabled.',
                         action='store_true')
+    parser.add_argument('--status_url', help='URL to call after each sync loop iteration for monitoring.',
+                        type=str)
 
     args = parser.parse_args()
 
@@ -1582,6 +1601,9 @@ def main():
             sleep_time = args.delay - delta_time
             logging.debug('Sleeping for %d seconds', sleep_time)
             time.sleep(sleep_time)
+
+        # Call status URL for monitoring (after each loop iteration)
+        call_status_url(args.status_url)
 
 
 if __name__ == '__main__':
