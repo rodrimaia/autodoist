@@ -4,7 +4,6 @@ from todoist_api_python.api import TodoistAPI
 from todoist_api_python.models import Task
 from todoist_api_python.models import Section
 from todoist_api_python.models import Project
-from todoist_api_python.http_requests import get
 from urllib.parse import urljoin
 from urllib.parse import quote
 import sys
@@ -281,7 +280,8 @@ def query_yes_no(question, default="yes"):
 
 def verify_label_existance(api, label_name, prompt_mode):
     # Check the regeneration label exists
-    labels = api.get_labels()
+    # In API v3, get_labels() returns a paginator that yields pages (lists)
+    labels = [label for page in api.get_labels() for label in page]
     label = [x for x in labels if x.name == label_name]
 
     if len(label) > 0:
@@ -305,7 +305,8 @@ def verify_label_existance(api, label_name, prompt_mode):
             except Exception as error:
                 logging.warning(error)
 
-            labels = api.get_labels()
+            # In API v3, get_labels() returns a paginator
+            labels = [label for page in api.get_labels() for label in page]
             label = [x for x in labels if x.name == label_name]
             next_action_label = label[0].id
 
@@ -452,11 +453,19 @@ def initialise_sync_api(api):
 
     try:
         response = requests.post(
-            'https://api.todoist.com/sync/v9/sync', headers=headers, data=data)
+            'https://api.todoist.com/api/v1/sync', headers=headers, data=data)
+
+        # Check status code before parsing JSON
+        if response.status_code == 200:
+            return response.json()
+
+        # Log error details for debugging
+        logging.error(f"Sync API error {response.status_code}: {response.text[:200]}")
+        response.raise_for_status()
+
     except Exception as e:
         logging.error(f"Error during initialise_sync_api: '{e}'")
-
-    return json.loads(response.text)
+        raise
 
 # Commit task content change to queue
 
@@ -513,11 +522,13 @@ def sync(api):
             '&commands=' + json.dumps(api.queue)
 
         response = requests.post(
-            'https://api.todoist.com/sync/v9/sync', headers=headers, data=data)
+            'https://api.todoist.com/api/v1/sync', headers=headers, data=data)
 
         if response.status_code == 200:
             return response.json()
 
+        # Log error details for debugging
+        logging.error(f"Sync API error {response.status_code}: {response.text[:200]}")
         response.raise_for_status()
         return response.ok
 
@@ -683,8 +694,8 @@ def remove_label(task, label, overview_task_ids, overview_task_labels):
 def check_header(api, model):
     header_all_in_level = False
     unheader_all_in_level = False
-    regex_a = '(^[*]{2}\s*)(.*)'
-    regex_b = '(^\-\*\s*)(.*)'
+    regex_a = r'(^[*]{2}\s*)(.*)'
+    regex_b = r'(^\-\*\s*)(.*)'
 
     try:
         if isinstance(model, Task):
@@ -984,9 +995,10 @@ def autodoist_magic(args, api, connection):
 
     # Get all todoist info
     try:
-        all_projects = api.get_projects()  # To save on request to stay under the limit
-        all_sections = api.get_sections()  # To save on request to stay under the limit
-        all_tasks = api.get_tasks()
+        # In API v3, get_*() methods return paginators that yield pages (lists)
+        all_projects = [item for page in api.get_projects() for item in page]
+        all_sections = [item for page in api.get_sections() for item in page]
+        all_tasks = [item for page in api.get_tasks() for item in page]
 
     except Exception as error:
         logging.error(error)
@@ -1041,7 +1053,9 @@ def autodoist_magic(args, api, connection):
         # Get all sections and add the 'None' section too.
         try:
             sections = [s for s in all_sections if s.project_id == project.id]
-            sections.insert(0, Section(None, None, 0, project.id))
+            # In API v3, Section requires: id, name, project_id, is_collapsed, order
+            # Create a fake section for tasks without a section
+            sections.insert(0, Section(id=None, name=None, project_id=project.id, is_collapsed=False, order=0))
         except Exception as error:
             logging.debug(error)
 
@@ -1086,8 +1100,9 @@ def autodoist_magic(args, api, connection):
             # Sort by parent_id and child order
             # In the past, Todoist used to screw up the tasks orders, so originally I processed parentless tasks first such that children could properly inherit porperties.
             # With the new API this seems to be in order, but I'm keeping this just in case for now. TODO: Could be used for optimization in the future.
+            # In API v3, IDs are strings, so don't convert to int
             section_tasks = sorted(section_tasks, key=lambda x: (
-                int(x.parent_id), x.order))
+                x.parent_id if x.parent_id else "", x.order))
 
             # If a type has changed, clean all tasks in this section for good measure
             if next_action_label is not None:
@@ -1366,7 +1381,7 @@ def autodoist_magic(args, api, connection):
                     # If start-date has not passed yet, remove label
                     try:
                         f1 = re.search(
-                            'start=(\d{2}[-]\d{2}[-]\d{4})', task.content)
+                            r'start=(\d{2}[-]\d{2}[-]\d{4})', task.content)
                         if f1:
                             start_date = f1.groups()[0]
                             start_date = datetime.strptime(
@@ -1389,7 +1404,7 @@ def autodoist_magic(args, api, connection):
                     if task.due is not None:
                         try:
                             f2 = re.search(
-                                'start=due-(\d+)([dw])', task.content)
+                                r'start=due-(\d+)([dw])', task.content)
 
                             if f2:
                                 offset = f2.groups()[0]
