@@ -285,9 +285,9 @@ def verify_label_existance(api, label_name, prompt_mode):
     label = [x for x in labels if x.name == label_name]
 
     if len(label) > 0:
-        next_action_label = label[0].id
+        next_action_label_id = label[0].id
         logging.debug('Label \'%s\' found as label id %s',
-                      label_name, next_action_label)
+                      label_name, next_action_label_id)
     else:
         # Create a new label in Todoist
         logging.info(
@@ -308,14 +308,15 @@ def verify_label_existance(api, label_name, prompt_mode):
             # In API v3, get_labels() returns a paginator
             labels = [label for page in api.get_labels() for label in page]
             label = [x for x in labels if x.name == label_name]
-            next_action_label = label[0].id
+            next_action_label_id = label[0].id
 
             logging.info("Label '{}' has been created!".format(label_name))
         else:
             logging.info('Exiting Autodoist.')
             exit(1)
 
-    return labels
+    # Return the label ID as string (REST API v2 uses string IDs)
+    return str(next_action_label_id)
 
 # Initialisation of Autodoist
 
@@ -383,7 +384,18 @@ def initialise_api(args):
     if args.label is not None:
 
         # Verify that the next action label exists; ask user if it needs to be created
-        verify_label_existance(api, args.label, 1)
+        # Get the label ID - keep args.label as the name (for checking with REST API)
+        label_id = verify_label_existance(api, args.label, 1)
+        # Store the label ID for Sync API v1 (which uses IDs)
+        args.label_id = label_id
+        # Store label name for later use
+        args.label_name = args.label
+        logging.debug(f"Using label '{args.label}' with ID: {args.label_id}")
+
+        # Create ID to name mapping for all labels
+        all_labels = [label for page in api.get_labels() for label in page]
+        api.label_id_to_name = {label.id: label.name for label in all_labels}
+        api.label_name_to_id = {label.name: label.id for label in all_labels}
 
     # TODO: Disabled for now
     # # If regeneration mode is used, verify labels
@@ -489,10 +501,21 @@ def commit_labels_update(api, overview_task_ids, overview_task_labels):
     for task_id in filtered_overview_ids:
         labels = overview_task_labels[task_id]
 
+        # Convert label IDs to label names for Sync API v1
+        # The REST API v2 returns IDs, but Sync API v1 expects names
+        label_names = []
+        for label in labels:
+            if hasattr(api, 'label_id_to_name') and label in api.label_id_to_name:
+                # It's an ID, convert to name
+                label_names.append(api.label_id_to_name[label])
+            else:
+                # It's already a name (or unknown), keep it
+                label_names.append(label)
+
         # api.update_task(task_id=task_id, labels=labels) # Not using REST API, since we would get too many single requests
         uuid = str(time.perf_counter())  # Create unique request id
         data = {"type": "item_update", "uuid": uuid,
-                "args": {"id": task_id, "labels": labels}}
+                "args": {"id": task_id, "labels": label_names}}
         api.queue.append(data)
 
     return api
@@ -705,11 +728,12 @@ def get_task_type(args, connection, task, section, project):
 # Logic to track addition of a label to a task
 
 
-def add_label(task, label, overview_task_ids, overview_task_labels):
-    if label not in task.labels:
-        labels = task.labels  # To also copy other existing labels
+def add_label(task, label_id, overview_task_ids, overview_task_labels):
+    # task.labels contains IDs as strings from REST API v2
+    if label_id not in task.labels:
+        labels = task.labels.copy()  # Copy to avoid modifying original
         logging.debug('Updating \'%s\' with label', task.content)
-        labels.append(label)
+        labels.append(label_id)
 
         try:
             overview_task_ids[task.id] += 1
@@ -720,11 +744,12 @@ def add_label(task, label, overview_task_ids, overview_task_labels):
 # Logic to track removal of a label from a task
 
 
-def remove_label(task, label, overview_task_ids, overview_task_labels):
-    if label in task.labels:
-        labels = task.labels
+def remove_label(task, label_id, overview_task_ids, overview_task_labels):
+    # task.labels contains IDs as strings from REST API v2
+    if label_id in task.labels:
+        labels = task.labels.copy()  # Copy to avoid modifying original
         logging.debug('Removing \'%s\' of its label', task.content)
-        labels.remove(label)
+        labels.remove(label_id)
 
         try:
             overview_task_ids[task.id] -= 1
@@ -1032,7 +1057,8 @@ def autodoist_magic(args, api, connection):
     # Preallocate dictionaries and other values
     overview_task_ids = {}
     overview_task_labels = {}
-    next_action_label = args.label
+    # Use label ID for all operations (REST API v2 uses IDs)
+    next_action_label = args.label_id if hasattr(args, 'label_id') else args.label
     regen_labels_id = args.regen_label_names
     first_found = [False, False, False]
     api.queue = []
