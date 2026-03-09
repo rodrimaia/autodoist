@@ -4,15 +4,12 @@ from todoist_api_python.api import TodoistAPI
 from todoist_api_python.models import Task
 from todoist_api_python.models import Section
 from todoist_api_python.models import Project
-from urllib.parse import urljoin
-from urllib.parse import quote
 import sys
 import time
 import requests
 import argparse
 import logging
 from datetime import datetime, timedelta
-import time
 import sqlite3
 import os
 import re
@@ -362,14 +359,10 @@ def initialise_api(args):
             "\n No functionality has been enabled. Please see --help for the available options.\n")
         exit(0)
 
-    # Run the initial sync
+    # Connect to the Todoist REST API via official SDK
     logging.debug('Connecting to the Todoist API')
     try:
-        api_arguments = {'token': args.api_key}
-        api = TodoistAPI(**api_arguments)
-        sync_api = initialise_sync_api(api)
-        # Save SYNC API token to enable partial syncs
-        api.sync_token = sync_api['sync_token']
+        api = TodoistAPI(token=args.api_key)
 
     except Exception as e:
         logging.error(
@@ -429,74 +422,34 @@ def check_for_update(current_version):
         logging.error("Error while checking for updates: {}".format(e))
         return 1
 
-# Get all data through the SYNC API. Needed to see e.g. any completed tasks.
+# Update a task's content via REST API
 
 
-def get_all_data(api):
-    BASE_URL = "https://api.todoist.com"
-    SYNC_VERSION = "v9"
-    SYNC_API = urljoin(BASE_URL, f"/sync/{SYNC_VERSION}/")
-    COMPLETED_GET_ALL = "completed/get_all"
-    endpoint = urljoin(SYNC_API, COMPLETED_GET_ALL)
-    data = get(api._session, endpoint, api._token)
-
-    return data
-
-
-def initialise_sync_api(api):
-    bearer_token = 'Bearer %s' % api._token
-
-    headers = {
-        'Authorization': bearer_token,
-        'Content-Type': 'application/x-www-form-urlencoded',
-    }
-    data = 'sync_token=*&resource_types=["all"]'
-
+def update_task_content(api, task_id, content):
     try:
-        response = requests.post(
-            'https://api.todoist.com/api/v1/sync', headers=headers, data=data)
-
-        # Check status code before parsing JSON
-        if response.status_code == 200:
-            return response.json()
-
-        # Log error details for debugging
-        logging.error(f"Sync API error {response.status_code}: {response.text[:200]}")
-        response.raise_for_status()
-
+        api.update_task(task_id=task_id, content=content)
+        return 1
     except Exception as e:
-        logging.error(f"Error during initialise_sync_api: '{e}'")
-        raise
+        logging.warning(f"Failed to update task {task_id} content: {e}")
+        return 0
 
-# Commit task content change to queue
-
-
-def commit_content_update(api, task_id, content):
-    uuid = str(time.perf_counter())  # Create unique request id
-    data = {"type": "item_update", "uuid": uuid,
-            "args": {"id": task_id, "content": quote(content)}}
-    api.queue.append(data)
-
-    return api
-
-# Ensure label updates are only issued once per task and commit to queue
+# Apply label updates via REST API
 
 
-def commit_labels_update(api, overview_task_ids, overview_task_labels):
-
+def apply_label_updates(api, overview_task_ids, overview_task_labels):
+    num_updates = 0
     filtered_overview_ids = [
         k for k, v in overview_task_ids.items() if v != 0]
 
     for task_id in filtered_overview_ids:
         labels = overview_task_labels[task_id]
+        try:
+            api.update_task(task_id=task_id, labels=labels)
+            num_updates += 1
+        except Exception as e:
+            logging.warning(f"Failed to update labels for task {task_id}: {e}")
 
-        # api.update_task(task_id=task_id, labels=labels) # Not using REST API, since we would get too many single requests
-        uuid = str(time.perf_counter())  # Create unique request id
-        data = {"type": "item_update", "uuid": uuid,
-                "args": {"id": task_id, "labels": labels}}
-        api.queue.append(data)
-
-    return api
+    return num_updates
 
 
 # Call status URL for monitoring
@@ -506,7 +459,7 @@ def call_status_url(url):
     """Call status URL for monitoring purposes."""
     if not url:
         return
-    
+
     try:
         response = requests.get(url, timeout=10)
         logging.debug(f'Status URL called successfully: {url} (status: {response.status_code})')
@@ -514,46 +467,6 @@ def call_status_url(url):
         logging.warning(f'Failed to call status URL {url}: {e}')
     except Exception as e:
         logging.warning(f'Unexpected error calling status URL {url}: {e}')
-
-
-# Update tasks in batch with Todoist Sync API
-
-
-def sync(api):
-    # # This approach does not seem to work correctly.
-    # BASE_URL = "https://api.todoist.com"
-    # SYNC_VERSION = "v9"
-    # SYNC_API = urljoin(BASE_URL, f"/sync/{SYNC_VERSION}/")
-    # SYNC_ENDPOINT = "sync"
-    # endpoint = urljoin(SYNC_API, SYNC_ENDPOINT)
-    # task_data = post(api._session, endpoint, api._token, data=data)
-
-    try:
-        bearer_token = 'Bearer %s' % api._token
-
-        headers = {
-            'Authorization': bearer_token,
-            'Content-Type': 'application/x-www-form-urlencoded',
-        }
-
-        data = 'sync_token=' + api.sync_token + \
-            '&commands=' + json.dumps(api.queue)
-
-        response = requests.post(
-            'https://api.todoist.com/api/v1/sync', headers=headers, data=data)
-
-        if response.status_code == 200:
-            return response.json()
-
-        # Log error details for debugging
-        logging.error(f"Sync API error {response.status_code}: {response.text[:200]}")
-        response.raise_for_status()
-        return response.ok
-
-    except Exception as e:
-        logging.exception(
-            'Error trying to sync with Todoist API: %s' % str(e))
-        quit()
 
 # Find the type based on name suffix.
 
@@ -740,6 +653,7 @@ def remove_label(task, label, overview_task_ids, overview_task_labels):
 def check_header(api, model):
     header_all_in_level = False
     unheader_all_in_level = False
+    num_updates = 0
     regex_a = r'(^[*]{2}\s*)(.*)'
     regex_b = r'(^\-\*\s*)(.*)'
 
@@ -752,12 +666,12 @@ def check_header(api, model):
                 header_all_in_level = True
                 model.content = ra[2]  # Local record
                 api.update_task(task_id=model.id, content=ra[2])
-                # overview_updated_ids.append(model.id) # Ignore this one, since else it's count double
+                num_updates += 1
             if rb:
                 unheader_all_in_level = True
                 model.content = rb[2]  # Local record
                 api.update_task(task_id=model.id, content=rb[2])
-                # overview_updated_ids.append(model.id)
+                num_updates += 1
         else:
             ra = re.search(regex_a, model.name)
             rb = re.search(regex_b, model.name)
@@ -766,64 +680,57 @@ def check_header(api, model):
                 if ra:
                     header_all_in_level = True
                     api.update_section(section_id=model.id, name=ra[2])
-                    api.overview_updated_ids.append(model.id)
+                    num_updates += 1
                 if rb:
                     unheader_all_in_level = True
                     api.update_section(section_id=model.id, name=rb[2])
-                    api.overview_updated_ids.append(model.id)
+                    num_updates += 1
 
             elif isinstance(model, Project):
                 if ra:
                     header_all_in_level = True
                     api.update_project(project_id=model.id, name=ra[2])
-                    api.overview_updated_ids.append(model.id)
+                    num_updates += 1
                 if rb:
                     unheader_all_in_level = True
                     api.update_project(project_id=model.id, name=rb[2])
-                    api.overview_updated_ids.append(model.id)
+                    num_updates += 1
     except:
         logging.debug('check_header: no right model found')
 
-    return api, header_all_in_level, unheader_all_in_level
+    return num_updates, header_all_in_level, unheader_all_in_level
 
 # Logic for applying and removing headers
 
 
 def modify_task_headers(api, task, section_tasks, header_all_in_p, unheader_all_in_p, header_all_in_s, unheader_all_in_s, header_all_in_t, unheader_all_in_t):
+    num_updates = 0
 
     if any([header_all_in_p, header_all_in_s]):
         if task.content[:2] != '* ':
             content = '* ' + task.content
-            api = commit_content_update(api, task.id, content)
-            # api.update_task(task_id=task.id, content='* ' + task.content)
-            # overview_updated_ids.append(task.id)
+            num_updates += update_task_content(api, task.id, content)
 
     if any([unheader_all_in_p, unheader_all_in_s]):
         if task.content[:2] == '* ':
             content = task.content[2:]
-            api = commit_content_update(api, task.id, content)
-            # api.update_task(task_id=task.id, content=task.content[2:])
-            # overview_updated_ids.append(task.id)
+            num_updates += update_task_content(api, task.id, content)
 
     if header_all_in_t:
         if task.content[:2] != '* ':
             content = '* ' + task.content
-            api = commit_content_update(api, task.id, content)
-            # api.update_task(task_id=task.id, content='* ' + task.content)
-            # overview_updated_ids.append(task.id)
-        api = find_and_headerify_all_children(
+            num_updates += update_task_content(api, task.id, content)
+        num_updates += find_and_headerify_all_children(
             api, task, section_tasks, 1)
 
     if unheader_all_in_t:
         if task.content[:2] == '* ':
             content = task.content[2:]
-            api = commit_content_update(api, task.id, content)
-            # api.update_task(task_id=task.id, content=task.content[2:])
-            # overview_updated_ids.append(task.id)
-        api = find_and_headerify_all_children(
+            num_updates += update_task_content(api, task.id, content)
+        num_updates += find_and_headerify_all_children(
             api, task, section_tasks, 2)
 
-    return api
+    return num_updates
 
 
 # Check regen mode based on label name
@@ -998,7 +905,7 @@ def find_and_clean_all_children(task_ids, task, section_tasks):
 
 
 def find_and_headerify_all_children(api, task, section_tasks, mode):
-
+    num_updates = 0
     child_tasks = list(filter(lambda x: x.parent_id == task.id, section_tasks))
 
     if child_tasks != []:
@@ -1006,24 +913,18 @@ def find_and_headerify_all_children(api, task, section_tasks, mode):
             # Children found, go deeper
             if mode == 1:
                 if child_task.content[:2] != '* ':
-                    api = commit_content_update(
+                    num_updates += update_task_content(
                         api, child_task.id, '* ' + child_task.content)
-                    # api.update_task(task_id=child_task.id,
-                    # content='* ' + child_task.content)
-                    # overview_updated_ids.append(child_task.id)
 
             elif mode == 2:
                 if child_task.content[:2] == '* ':
-                    api = commit_content_update(
+                    num_updates += update_task_content(
                         api, child_task.id, child_task.content[2:])
-                    # api.update_task(task_id=child_task.id,
-                    #                 content=child_task.content[2:])
-                    # overview_updated_ids.append(child_task.id)
 
-            find_and_headerify_all_children(
+            num_updates += find_and_headerify_all_children(
                 api, child_task, section_tasks, mode)
 
-    return 0
+    return num_updates
 
 # Contains all main autodoist functionalities
 
@@ -1036,8 +937,7 @@ def autodoist_magic(args, api, connection):
     next_action_label = args.label
     regen_labels_id = args.regen_label_names
     first_found = [False, False, False]
-    api.queue = []
-    api.overview_updated_ids = []
+    num_updates = 0
 
     # Get all todoist info
     try:
@@ -1059,8 +959,9 @@ def autodoist_magic(args, api, connection):
         db_check_existance(connection, project)
 
         # Check if we need to (un)header entire project
-        api, header_all_in_p, unheader_all_in_p = check_header(
+        header_updates, header_all_in_p, unheader_all_in_p = check_header(
             api, project)
+        num_updates += header_updates
 
         # Get project type
         if next_action_label is not None:
@@ -1125,8 +1026,9 @@ def autodoist_magic(args, api, connection):
                 db_check_existance(connection, section)
 
                 # Check if we need to (un)header entire secion
-                api, header_all_in_s, unheader_all_in_s = check_header(
+                header_updates, header_all_in_s, unheader_all_in_s = check_header(
                     api, section)
+                num_updates += header_updates
 
                 # Get section type
                 if next_action_label:
@@ -1187,12 +1089,13 @@ def autodoist_magic(args, api, connection):
                     filter(lambda x: x.parent_id == task.id, non_completed_tasks))
 
                 # Check if we need to (un)header entire task tree
-                api, header_all_in_t, unheader_all_in_t = check_header(
+                header_updates, header_all_in_t, unheader_all_in_t = check_header(
                     api, task)
+                num_updates += header_updates
 
                 # Modify headers where needed
-                api = modify_task_headers(api, task, section_tasks, header_all_in_p,
-                                          unheader_all_in_p, header_all_in_s, unheader_all_in_s, header_all_in_t, unheader_all_in_t)
+                num_updates += modify_task_headers(api, task, section_tasks, header_all_in_p,
+                                                   unheader_all_in_p, header_all_in_s, unheader_all_in_s, header_all_in_t, unheader_all_in_t)
 
                 # TODO: Check is regeneration is still needed, now that it's part of core Todoist. Disabled for now.
                 # Logic for recurring lists
@@ -1503,7 +1406,7 @@ def autodoist_magic(args, api, connection):
                 first_found[0] = True
 
     # Return all ids and corresponding labels that need to be modified
-    return overview_task_ids, overview_task_labels
+    return overview_task_ids, overview_task_labels, num_updates
 
 # Main
 
@@ -1585,19 +1488,13 @@ def main():
         start_time = time.time()
 
         # Evaluate projects, sections, and tasks
-        overview_task_ids, overview_task_labels = autodoist_magic(
+        overview_task_ids, overview_task_labels, num_changes = autodoist_magic(
             args, api, connection)
 
-        # Commit next action label changes
+        # Commit next action label changes via REST API
         if args.label is not None:
-            api = commit_labels_update(api, overview_task_ids,
-                                       overview_task_labels)
-
-        # Sync all queued up changes
-        if api.queue:
-            sync(api)
-
-        num_changes = len(api.queue)+len(api.overview_updated_ids)
+            num_changes += apply_label_updates(api, overview_task_ids,
+                                               overview_task_labels)
 
         if num_changes:
             if num_changes == 1:
@@ -1607,7 +1504,7 @@ def main():
                 logging.info(
                     '%d changes committed to Todoist.', num_changes)
         else:
-            logging.info('No changes in queue, skipping sync.')
+            logging.info('No changes needed, skipping sync.')
 
         # Call status URL for monitoring
         call_status_url(args.status_url)
