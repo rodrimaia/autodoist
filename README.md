@@ -1,4 +1,14 @@
-# Autodoist
+# Autodoist (fork)
+
+This is a fork of [Hoffelhas/autodoist](https://github.com/Hoffelhas/autodoist) with the following additions:
+
+- **`--all_projects`**: Process all projects regardless of whether they have a suffix tag. Useful if you want next-action labels on everything by default.
+- **`--ignore_suffix`**: When used with `--all_projects`, excludes projects ending with `_ignore` from processing.
+- **`--status_url <URL>`**: Call an HTTP endpoint after each sync loop for process monitoring (e.g. Uptime Kuma, Healthchecks.io).
+- **REST API migration**: Replaced the deprecated Sync API with direct REST API calls through the official `todoist-api-python` SDK. Fixes label assignment bugs related to batch command chunking.
+- **GitHub Actions**: Workflow to automatically build and publish a Docker image to GHCR.
+
+---
 
 *Note: v2.0 is a major overhaul of Autodoist, so please be sure to view the README in order to get up to speed with the latest changes. Thanks to everyone for helping out and supporting this project!*
 
