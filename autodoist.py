@@ -1248,7 +1248,7 @@ def autodoist_magic(args, api, connection):
                                     add_label(
                                         task, next_action_label, overview_task_ids, overview_task_labels)
 
-                                if next_action_label in task.labels:
+                                elif next_action_label in task.labels:
                                     # Probably the task has been manually moved, so if it has a label, let's remove it.
                                     remove_label(
                                         task, next_action_label, overview_task_ids, overview_task_labels)
