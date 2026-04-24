@@ -6,6 +6,7 @@ This is a fork of [Hoffelhas/autodoist](https://github.com/Hoffelhas/autodoist) 
 - **`--ignore_suffix`**: When used with `--all_projects`, excludes projects ending with `_ignore` from processing.
 - **`--status_url <URL>`**: Call an HTTP endpoint after each sync loop for process monitoring (e.g. Uptime Kuma, Healthchecks.io).
 - **REST API migration**: Replaced the deprecated Sync API with direct REST API calls through the official `todoist-api-python` SDK. Fixes label assignment bugs related to batch command chunking.
+- **Test suite**: Comprehensive tests covering sequential/parallel suffix logic and task labeling behavior.
 - **GitHub Actions**: Workflow to automatically build and publish a Docker image to GHCR.
 
 ---
@@ -32,7 +33,7 @@ If this tool helped you out, I would really appreciate your support by providing
 Autodoist has been build with Python 3.11.1, which is the recommended version. Older versions of 3.x should be compatible, however be aware that they have not been tested.
 
 To run Autodoist the following packages are required:
-* ```todoist-python```
+* ```todoist-api-python```
 * ```requests```
 
 For your convenience a requirements.txt is provided, which allows you to install them by using pip:
