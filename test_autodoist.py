@@ -21,6 +21,19 @@ from typing import Optional
 
 import pytest
 
+from next_action_planner import (
+    AutodoistMetadataSnapshot,
+    LabelStrategy,
+    PlannerConfig,
+    ProjectSnapshot,
+    SectionSnapshot,
+    SelectionStrategy,
+    TaskSnapshot,
+    WorkspaceSnapshot,
+    label_strategy_to_legacy_type,
+    parse_label_strategy,
+)
+
 
 # ---------------------------------------------------------------------------
 # Mock Todoist models (same pattern as test_labeling.py)
@@ -101,8 +114,6 @@ from autodoist import (
     db_check_existance, db_read_value, db_update_value,
     execute_query, execute_read_query, get_labels_with_startup_retry,
     initialise_api, verify_label_existance, configure_logging,
-    LabelStrategy, SelectionStrategy, parse_label_strategy,
-    label_strategy_to_legacy_type,
 )
 
 
@@ -466,6 +477,71 @@ class TestLabelStrategyParser:
         )
 
         assert label_strategy_to_legacy_type(strategy) == 'xsp'
+
+
+# ---------------------------------------------------------------------------
+# Group 1b: TestPlannerSnapshots - Normalized planner input records
+# ---------------------------------------------------------------------------
+
+class TestPlannerSnapshots:
+    """Tests for plain planner records that do not expose SDK or SQLite types."""
+
+    def test_workspace_snapshot_uses_plain_records(self):
+        project = ProjectSnapshot(
+            id='p1',
+            name='Work -',
+            order=1,
+            is_inbox_project=False,
+        )
+        section = SectionSnapshot(
+            id='s1',
+            name='Next',
+            project_id='p1',
+            order=1,
+            is_labeling_disabled=False,
+        )
+        task = TaskSnapshot(
+            id='t1',
+            content='Task',
+            project_id='p1',
+            section_id='s1',
+            parent_id=None,
+            labels=('next_action',),
+            order=1,
+            is_completed=False,
+            due_date=date(2026, 7, 2),
+            is_header=False,
+        )
+
+        snapshot = WorkspaceSnapshot(
+            projects=(project,),
+            sections=(section,),
+            tasks=(task,),
+        )
+
+        assert snapshot.projects[0].id == 'p1'
+        assert snapshot.sections[0].project_id == 'p1'
+        assert snapshot.tasks[0].labels == ('next_action',)
+
+    def test_metadata_snapshot_uses_domain_strategy_facts(self):
+        strategy = LabelStrategy(
+            project_selection=SelectionStrategy.SEQUENTIAL,
+            section_selection=SelectionStrategy.PARALLEL,
+            task_selection=SelectionStrategy.SEQUENTIAL,
+        )
+
+        metadata = AutodoistMetadataSnapshot(
+            project_strategies={'p1': strategy},
+            task_parent_strategies={'t2': SelectionStrategy.SEQUENTIAL},
+        )
+
+        assert metadata.project_strategies['p1'] == strategy
+        assert metadata.task_parent_strategies['t2'] == SelectionStrategy.SEQUENTIAL
+
+    def test_planner_config_is_independent_of_argparse(self):
+        config = PlannerConfig(next_action_label='next_action')
+
+        assert config.next_action_label == 'next_action'
 
 
 # ---------------------------------------------------------------------------
