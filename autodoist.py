@@ -1476,19 +1476,15 @@ def autodoist_magic(args, api, connection):
                                 elif f2.groups()[1] == 'w':
                                     td = timedelta(weeks=int(offset))
 
-                                # Determine start-date
-                                try:
-                                    due_date = datetime.strptime(
-                                        task.due.datetime, "%Y-%m-%dT%H:%M:%S")
-                                except:
-                                    due_date = datetime.strptime(
-                                        task.due.date, "%Y-%m-%d")
+                                due_date = normalise_due_date(task.due)
+                                if due_date is None:
+                                    raise ValueError(
+                                        f"Could not parse due date for task: {task.content}")
 
                                 start_date = due_date - td
 
                                 # If we're not in the offset from the due date yet, remove all labels
-                                future_diff = (
-                                    datetime.today()-start_date).days
+                                future_diff = (date.today()-start_date).days
 
                                 if future_diff < 0:
                                     remove_label(

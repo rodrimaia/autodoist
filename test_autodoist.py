@@ -817,6 +817,7 @@ class TestIntegration:
             regen_label_names=None,
             end=None,
             hide_future=0,
+            dateformat="%d-%m-%Y",
         )
         defaults.update(overrides)
         return argparse.Namespace(**defaults)
@@ -915,6 +916,25 @@ class TestIntegration:
         assert self.LABEL not in task.labels
         assert ids == {"t1": 0}
         assert labels == {"t1": []}
+
+    def test_relative_start_due_with_sdk_date_object_removes_child_labels(self, caplog):
+        """start=due-* should understand SDK date objects and hide children until start."""
+        project = FakeProject(id="p1", name="Work =")
+        parent = make_task(
+            "t1", content="Declarar IR start=due-0d", project_id="p1", order=0)
+        parent.due = FakeDue(date=date.today() + timedelta(days=365))
+        child = make_task(
+            "c1", project_id="p1", parent_id="t1", order=0,
+            labels=[self.LABEL])
+
+        with caplog.at_level(logging.WARNING):
+            (ids, labels, _), _ = self._run([project], [], [parent, child])
+
+        assert self.LABEL not in parent.labels
+        assert self.LABEL not in child.labels
+        assert ids == {"t1": 0, "c1": -1}
+        assert labels == {"t1": [], "c1": []}
+        assert "Wrong start-date format" not in caplog.text
 
     def test_headered_tasks_skipped(self):
         """Tasks starting with '*' should not get the label."""
