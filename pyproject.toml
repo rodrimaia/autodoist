@@ -1,0 +1,22 @@
+[project]
+name = "autodoist"
+version = "2.0"
+description = "Added functionality for Todoist: next-action labels, sub-task regeneration, postpone end of day, and (un)header items"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "Alexander Haselhoff", email = "xela@live.nl" },
+]
+dependencies = [
+    "requests>=2.32.3,<3",
+    "todoist-api-python==3.2.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/Hoffelhas/automation-todoist"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]

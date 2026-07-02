@@ -7,7 +7,7 @@ This is a fork of [Hoffelhas/autodoist](https://github.com/Hoffelhas/autodoist) 
 - **`--status_url <URL>`**: Call an HTTP endpoint after each sync loop for process monitoring (e.g. Uptime Kuma, Healthchecks.io).
 - **REST API migration**: Replaced the deprecated Sync API with direct REST API calls through the official `todoist-api-python` SDK. Fixes label assignment bugs related to batch command chunking.
 - **Test suite**: Comprehensive tests covering sequential/parallel suffix logic and task labeling behavior.
-- **GitHub Actions**: Workflow to automatically build and publish a Docker image to GHCR.
+- **GitHub Actions**: Workflow to run the test suite on pushes and pull requests, then publish a Docker image to GHCR on `master` pushes.
 
 ---
 
@@ -36,9 +36,9 @@ To run Autodoist the following packages are required:
 * ```todoist-api-python```
 * ```requests```
 
-For your convenience a requirements.txt is provided, which allows you to install them by using pip:
+For your convenience a `pyproject.toml` and `uv.lock` are provided, which allow you to install the locked dependencies with uv:
 
-`pip install -r requirements.txt`
+`uv sync --frozen`
 
 # 1. Automatic next action labels
 

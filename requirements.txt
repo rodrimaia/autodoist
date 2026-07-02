@@ -1,2 +1,0 @@
-requests>=2.32.3,<3
-todoist_api_python==3.2.1

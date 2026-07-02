@@ -1,10 +1,13 @@
-FROM python:3-slim-bullseye
+FROM python:3-slim-bookworm
 
-WORKDIR /usr/src/app
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+WORKDIR /app
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev --no-install-project
 
 COPY . .
 
-ENTRYPOINT [ "python", "./autodoist.py" ]
+ENV PATH="/app/.venv/bin:$PATH"
+ENTRYPOINT ["python", "autodoist.py"]

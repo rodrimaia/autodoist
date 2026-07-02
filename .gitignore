@@ -62,3 +62,9 @@ target/
 # VSCODE
 .json
 .vscode
+
+# Virtual environment
+.venv/
+
+# Runtime artifacts
+metadata.sqlite
