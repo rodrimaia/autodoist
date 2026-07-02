@@ -23,14 +23,19 @@ import pytest
 
 from next_action_planner import (
     AutodoistMetadataSnapshot,
+    LabelChange,
     LabelStrategy,
     PlannerConfig,
     ProjectSnapshot,
+    RecordProjectStrategy,
+    RecordSectionStrategy,
+    RecordTaskStrategy,
     SectionSnapshot,
     SelectionStrategy,
     TaskSnapshot,
     WorkspaceSnapshot,
     label_strategy_to_legacy_type,
+    plan_parentless_next_action_labels,
     parse_label_strategy,
 )
 
@@ -542,6 +547,207 @@ class TestPlannerSnapshots:
         config = PlannerConfig(next_action_label='next_action')
 
         assert config.next_action_label == 'next_action'
+
+
+# ---------------------------------------------------------------------------
+# Group 1c: TestParentlessPlanner - Parentless next-action planning
+# ---------------------------------------------------------------------------
+
+class TestParentlessPlanner:
+    LABEL = 'next_action'
+
+    def _workspace(self, project_name='Work -', section_name=None, tasks=()):
+        project = ProjectSnapshot(
+            id='p1',
+            name=project_name,
+            order=1,
+            is_inbox_project=False,
+        )
+        section = SectionSnapshot(
+            id='s1',
+            name=section_name,
+            project_id='p1',
+            order=1,
+        )
+        return WorkspaceSnapshot(
+            projects=(project,),
+            sections=(section,),
+            tasks=tasks,
+        )
+
+    def _task(self, id, content='Task', labels=(), order=1, section_id='s1'):
+        return TaskSnapshot(
+            id=id,
+            content=content,
+            project_id='p1',
+            section_id=section_id,
+            parent_id=None,
+            labels=tuple(labels),
+            order=order,
+        )
+
+    def _plan(self, workspace, metadata=None):
+        return plan_parentless_next_action_labels(
+            workspace,
+            PlannerConfig(next_action_label=self.LABEL),
+            metadata or AutodoistMetadataSnapshot(),
+        )
+
+    def test_project_sequential_labels_first_parentless_task(self):
+        workspace = self._workspace(tasks=(
+            self._task('t1', order=1),
+            self._task('t2', order=2),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='t1', labels=(self.LABEL,)),
+        )
+
+    def test_project_parallel_labels_all_parentless_tasks(self):
+        workspace = self._workspace(project_name='Work =', tasks=(
+            self._task('t1', order=1),
+            self._task('t2', order=2),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='t1', labels=(self.LABEL,)),
+            LabelChange(task_id='t2', labels=(self.LABEL,)),
+        )
+
+    def test_unsorted_task_without_section_uses_synthetic_none_section(self):
+        workspace = WorkspaceSnapshot(
+            projects=(
+                ProjectSnapshot(
+                    id='p1',
+                    name='Work -',
+                    order=1,
+                    is_inbox_project=False,
+                ),
+            ),
+            tasks=(
+                self._task('t1', section_id=None, order=1),
+            ),
+        )
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='t1', labels=(self.LABEL,)),
+        )
+
+    def test_section_sequential_overrides_unsuffixed_project(self):
+        workspace = self._workspace(project_name='Work', section_name='Next -', tasks=(
+            self._task('t1', order=1),
+            self._task('t2', labels=(self.LABEL,), order=2),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='t1', labels=(self.LABEL,)),
+            LabelChange(task_id='t2', labels=()),
+        )
+
+    def test_task_parallel_suffix_labels_that_parentless_task(self):
+        workspace = self._workspace(project_name='Work', tasks=(
+            self._task('t1', content='Task =', order=1),
+            self._task('t2', order=2),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='t1', labels=(self.LABEL,)),
+        )
+
+    def test_stale_label_is_removed_when_no_strategy_applies(self):
+        workspace = self._workspace(project_name='Work', tasks=(
+            self._task('t1', labels=(self.LABEL,), order=1),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='t1', labels=()),
+        )
+
+    def test_metadata_command_can_be_returned_without_label_change(self):
+        workspace = self._workspace(tasks=(
+            self._task('t1', labels=(self.LABEL,), order=1),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == ()
+        assert RecordProjectStrategy(
+            project_id='p1',
+            strategy=LabelStrategy(
+                project_selection=SelectionStrategy.SEQUENTIAL,
+                section_selection=SelectionStrategy.SEQUENTIAL,
+                task_selection=SelectionStrategy.SEQUENTIAL,
+            ),
+        ) in result.metadata_commands
+
+    def test_project_strategy_change_cleans_stale_parentless_label(self):
+        workspace = self._workspace(project_name='Work -', tasks=(
+            self._task('t1', labels=(self.LABEL,), order=1),
+            self._task('t2', labels=(self.LABEL,), order=2),
+        ))
+        old_parallel = LabelStrategy(
+            project_selection=SelectionStrategy.PARALLEL,
+            section_selection=SelectionStrategy.PARALLEL,
+            task_selection=SelectionStrategy.PARALLEL,
+        )
+
+        result = self._plan(
+            workspace,
+            AutodoistMetadataSnapshot(project_strategies={'p1': old_parallel}),
+        )
+
+        assert result.label_changes == (
+            LabelChange(task_id='t2', labels=()),
+        )
+        assert RecordProjectStrategy(
+            project_id='p1',
+            strategy=LabelStrategy(
+                project_selection=SelectionStrategy.SEQUENTIAL,
+                section_selection=SelectionStrategy.SEQUENTIAL,
+                task_selection=SelectionStrategy.SEQUENTIAL,
+            ),
+        ) in result.metadata_commands
+
+    def test_strategy_metadata_commands_use_domain_terms(self):
+        workspace = self._workspace(
+            project_name='Work =',
+            section_name='Next -',
+            tasks=(self._task('t1', content='Task =', order=1),),
+        )
+
+        result = self._plan(workspace)
+
+        assert RecordProjectStrategy(
+            project_id='p1',
+            strategy=LabelStrategy(
+                project_selection=SelectionStrategy.PARALLEL,
+                section_selection=SelectionStrategy.PARALLEL,
+                task_selection=SelectionStrategy.PARALLEL,
+            ),
+        ) in result.metadata_commands
+        assert RecordSectionStrategy(
+            section_id='s1',
+            strategy=LabelStrategy(
+                section_selection=SelectionStrategy.SEQUENTIAL,
+                task_selection=SelectionStrategy.SEQUENTIAL,
+            ),
+        ) in result.metadata_commands
+        assert RecordTaskStrategy(
+            task_id='t1',
+            strategy=LabelStrategy(task_selection=SelectionStrategy.PARALLEL),
+        ) in result.metadata_commands
 
 
 # ---------------------------------------------------------------------------
