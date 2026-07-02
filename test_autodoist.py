@@ -886,6 +886,107 @@ class TestChildPropagationPlanner:
 
 
 # ---------------------------------------------------------------------------
+# Group 1e: TestActionableDatePlanner - Date filtering in next-action planning
+# ---------------------------------------------------------------------------
+
+class TestActionableDatePlanner:
+    LABEL = 'next_action'
+    TODAY = date(2026, 7, 2)
+
+    def _workspace(self, tasks, project_name='Work -'):
+        return WorkspaceSnapshot(
+            projects=(
+                ProjectSnapshot(
+                    id='p1',
+                    name=project_name,
+                    order=1,
+                    is_inbox_project=False,
+                ),
+            ),
+            sections=(
+                SectionSnapshot(
+                    id='s1',
+                    name=None,
+                    project_id='p1',
+                    order=1,
+                ),
+            ),
+            tasks=tasks,
+        )
+
+    def _task(self, id, content='Task', parent_id=None, labels=(), order=1, due_date=None):
+        return TaskSnapshot(
+            id=id,
+            content=content,
+            project_id='p1',
+            section_id='s1',
+            parent_id=parent_id,
+            labels=tuple(labels),
+            order=order,
+            due_date=due_date,
+        )
+
+    def _plan(self, workspace, **config_overrides):
+        defaults = dict(next_action_label=self.LABEL, today=self.TODAY)
+        defaults.update(config_overrides)
+        return plan_next_action_labels(
+            workspace,
+            PlannerConfig(**defaults),
+            AutodoistMetadataSnapshot(),
+        )
+
+    def test_hide_future_filters_future_task_label(self):
+        workspace = self._workspace((
+            self._task('future', due_date=date(2026, 7, 20), order=1),
+            self._task('current', order=2),
+        ), project_name='Work =')
+
+        result = self._plan(workspace, hide_future=14)
+
+        assert result.label_changes == (
+            LabelChange(task_id='current', labels=(self.LABEL,)),
+        )
+
+    def test_absolute_start_date_removes_task_tree_labels_until_start(self):
+        workspace = self._workspace((
+            self._task('parent', content='Parent start=05-07-2026', order=1),
+            self._task('child', parent_id='parent', labels=(self.LABEL,), order=1),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='child', labels=()),
+        )
+
+    def test_due_relative_start_date_removes_task_tree_labels_until_start(self):
+        workspace = self._workspace((
+            self._task(
+                'parent',
+                content='Parent start=due-2d',
+                order=1,
+                due_date=date(2026, 7, 10),
+            ),
+            self._task('child', parent_id='parent', labels=(self.LABEL,), order=1),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='child', labels=()),
+        )
+
+    def test_malformed_absolute_start_date_preserves_existing_label(self):
+        workspace = self._workspace((
+            self._task('task', content='Task start=99-99-9999', labels=(self.LABEL,), order=1),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == ()
+
+
+# ---------------------------------------------------------------------------
 # Group 1: TestCheckName - Suffix parsing
 # ---------------------------------------------------------------------------
 

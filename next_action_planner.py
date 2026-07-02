@@ -1,6 +1,6 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timedelta
 from enum import StrEnum
 import re
 
@@ -33,6 +33,9 @@ class PlannerConfig:
     inbox: str | None = None
     all_projects: bool = False
     ignore_suffix: bool = False
+    hide_future: int = 0
+    dateformat: str = '%d-%m-%Y'
+    today: date | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -364,6 +367,13 @@ def plan_next_action_labels(workspace, config, metadata):
             section_labeling_disabled=section.is_labeling_disabled if section else False,
         )
 
+    _apply_actionable_date_filters(
+        workspace.tasks,
+        children_by_parent,
+        desired_labels,
+        config,
+    )
+
     label_changes = [
         LabelChange(task_id=task.id, labels=desired_labels[task.id])
         for task in workspace.tasks
@@ -519,6 +529,70 @@ def _record_parent_strategy(task_id, strategy, metadata, metadata_commands):
     command = RecordTaskParentStrategy(task_id=task_id, strategy=strategy)
     if command not in metadata_commands:
         metadata_commands.append(command)
+
+
+def _apply_actionable_date_filters(tasks, children_by_parent, desired_labels, config):
+    today = config.today or date.today()
+    for task in tasks:
+        if _is_hidden_future_task(task, config.hide_future, today):
+            desired_labels[task.id] = _without_label(
+                desired_labels[task.id],
+                config.next_action_label,
+            )
+            continue
+
+        if _absolute_start_date_is_future(task, config.dateformat, today):
+            _remove_label_from_task_tree(
+                task,
+                children_by_parent,
+                desired_labels,
+                config.next_action_label,
+            )
+            continue
+
+        if _relative_start_date_is_future(task, today):
+            _remove_label_from_task_tree(
+                task,
+                children_by_parent,
+                desired_labels,
+                config.next_action_label,
+            )
+
+
+def _is_hidden_future_task(task, hide_future, today):
+    if hide_future <= 0 or task.due_date is None:
+        return False
+    return (task.due_date - today).days >= hide_future
+
+
+def _absolute_start_date_is_future(task, dateformat, today):
+    match = re.search(r'start=(\d\d-\d\d-\d\d\d\d)', task.content)
+    if not match:
+        return False
+    try:
+        parsed = datetime.strptime(match.group(1), dateformat)
+        start_date = date(parsed.year, parsed.month, parsed.day)
+    except ValueError:
+        return False
+    return (today - start_date).days < 0
+
+
+def _relative_start_date_is_future(task, today):
+    match = re.search(r'start=due-(\d+)([dw])', task.content)
+    if not match or task.due_date is None:
+        return False
+
+    amount = int(match.group(1))
+    unit = match.group(2)
+    days = amount if unit == 'd' else amount * 7
+    start_date = task.due_date - timedelta(days=days)
+    return (today - start_date).days < 0
+
+
+def _remove_label_from_task_tree(task, children_by_parent, desired_labels, label):
+    desired_labels[task.id] = _without_label(desired_labels[task.id], label)
+    for child in children_by_parent.get(task.id, ()):
+        _remove_label_from_task_tree(child, children_by_parent, desired_labels, label)
 
 
 def _plan_parentless_task_labels(
