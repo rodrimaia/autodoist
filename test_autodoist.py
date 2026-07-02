@@ -950,6 +950,23 @@ class TestActionableDatePlanner:
             LabelChange(task_id='child', labels=()),
         )
 
+    def test_due_relative_start_date_removes_child_labels_before_hide_future(self):
+        workspace = self._workspace((
+            self._task(
+                'parent',
+                content='Declarar IR start=due-0d',
+                order=1,
+                due_date=date(2027, 5, 1),
+            ),
+            self._task('child', parent_id='parent', labels=(self.LABEL,), order=1),
+        ))
+
+        result = self._plan(workspace, hide_future=1)
+
+        assert result.label_changes == (
+            LabelChange(task_id='child', labels=()),
+        )
+
     def test_malformed_absolute_start_date_preserves_existing_label(self):
         workspace = self._workspace((
             self._task('task', content='Task start=99-99-9999', labels=(self.LABEL,), order=1),

@@ -36,6 +36,10 @@ _Avoid_: breaking cleanup, behavioral rewrite, v3 behavior
 The sequential or parallel rule that tells Autodoist how to choose actionable tasks at a project, section, task, or child-task level.
 _Avoid_: suffix code, mode string, type code
 
+**Actionable date marker**:
+A phrase on a Todoist task that delays when the task may receive the next-action label, either until an absolute date or until a date relative to the task's due date.
+_Avoid_: start-date hack, date suffix
+
 **Autodoist metadata**:
 Persisted facts from previous sync loops that Autodoist uses to detect label strategy changes and continue next-action label propagation correctly.
 _Avoid_: SQLite data, task_type columns, internal cache
