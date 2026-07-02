@@ -101,6 +101,8 @@ from autodoist import (
     db_check_existance, db_read_value, db_update_value,
     execute_query, execute_read_query, get_labels_with_startup_retry,
     initialise_api, verify_label_existance, configure_logging,
+    LabelStrategy, SelectionStrategy, parse_label_strategy,
+    label_strategy_to_legacy_type,
 )
 
 
@@ -394,6 +396,79 @@ class TestStartupVerification:
 
 
 # ---------------------------------------------------------------------------
+# Group 1a: TestLabelStrategyParser - Explicit suffix parser
+# ---------------------------------------------------------------------------
+
+class TestLabelStrategyParser:
+    """Tests for explicit label strategy values before legacy adaptation."""
+
+    def test_project_suffix_returns_explicit_strategy(self):
+        assert parse_label_strategy(make_args(), 'Project -=-', 3) == LabelStrategy(
+            project_selection=SelectionStrategy.SEQUENTIAL,
+            section_selection=SelectionStrategy.PARALLEL,
+            task_selection=SelectionStrategy.SEQUENTIAL,
+        )
+
+    def test_section_strategy_has_no_project_selection(self):
+        assert parse_label_strategy(make_args(), 'Section =-', 2) == LabelStrategy(
+            project_selection=None,
+            section_selection=SelectionStrategy.PARALLEL,
+            task_selection=SelectionStrategy.SEQUENTIAL,
+        )
+
+    def test_task_strategy_only_sets_task_selection(self):
+        assert parse_label_strategy(make_args(), 'Task -', 1) == LabelStrategy(
+            task_selection=SelectionStrategy.SEQUENTIAL,
+        )
+
+    def test_shorthand_expands_last_selection(self):
+        assert parse_label_strategy(make_args(), 'Project =-', 3) == LabelStrategy(
+            project_selection=SelectionStrategy.PARALLEL,
+            section_selection=SelectionStrategy.SEQUENTIAL,
+            task_selection=SelectionStrategy.SEQUENTIAL,
+        )
+
+    def test_custom_suffix_characters(self):
+        args = make_args(s_suffix='#', p_suffix='@')
+        assert parse_label_strategy(args, 'Project #@', 3) == LabelStrategy(
+            project_selection=SelectionStrategy.SEQUENTIAL,
+            section_selection=SelectionStrategy.PARALLEL,
+            task_selection=SelectionStrategy.PARALLEL,
+        )
+
+    def test_all_projects_defaults_unsuffixed_projects_to_sequential(self):
+        assert parse_label_strategy(make_args(all_projects=True), 'Project', 3) == LabelStrategy(
+            project_selection=SelectionStrategy.SEQUENTIAL,
+            section_selection=SelectionStrategy.SEQUENTIAL,
+            task_selection=SelectionStrategy.SEQUENTIAL,
+        )
+
+    def test_ignore_suffix_suppresses_all_projects_default_only(self):
+        args = make_args(all_projects=True, ignore_suffix=True)
+
+        assert parse_label_strategy(args, 'Project_ignore', 3) is None
+        assert parse_label_strategy(args, 'Project_ignore =', 3) == LabelStrategy(
+            project_selection=SelectionStrategy.PARALLEL,
+            section_selection=SelectionStrategy.PARALLEL,
+            task_selection=SelectionStrategy.PARALLEL,
+        )
+
+    def test_suffix_in_middle_is_ignored(self):
+        assert parse_label_strategy(make_args(), 'My - Project', 3) is None
+
+    def test_inbox_is_left_to_legacy_adapter(self):
+        assert parse_label_strategy(make_args(inbox='parallel'), 'Inbox', 3) is None
+
+    def test_legacy_adapter_keeps_positional_type_string(self):
+        strategy = LabelStrategy(
+            section_selection=SelectionStrategy.SEQUENTIAL,
+            task_selection=SelectionStrategy.PARALLEL,
+        )
+
+        assert label_strategy_to_legacy_type(strategy) == 'xsp'
+
+
+# ---------------------------------------------------------------------------
 # Group 1: TestCheckName - Suffix parsing
 # ---------------------------------------------------------------------------
 
@@ -408,6 +483,9 @@ class TestCheckName:
 
     def test_inbox_returns_args_inbox_value(self):
         assert check_name(make_args(inbox='sss'), 'Inbox', 3) == 'sss'
+
+    def test_inbox_preserves_cli_choice_value(self):
+        assert check_name(make_args(inbox='parallel'), 'Inbox', 3) == 'parallel'
 
     def test_no_suffix_returns_none(self):
         assert check_name(make_args(), 'My Project', 3) is None

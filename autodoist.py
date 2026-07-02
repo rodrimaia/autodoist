@@ -9,7 +9,9 @@ import time
 import requests
 import argparse
 import logging
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from enum import StrEnum
 import sqlite3
 import os
 import re
@@ -583,70 +585,149 @@ def is_hidden_future_task(task, hide_future):
 
     return (due_date - date.today()).days >= hide_future
 
+class SelectionStrategy(StrEnum):
+    """How next-action labels are selected at one hierarchy level.
+
+    Sequential labels only the first eligible item at that level. Parallel
+    labels every eligible item at that level.
+    """
+
+    SEQUENTIAL = 's'
+    PARALLEL = 'p'
+
+
+@dataclass(frozen=True, slots=True)
+class LabelStrategy:
+    """Explicit next-action label strategy across project, section, and task levels."""
+
+    project_selection: SelectionStrategy | None = None
+    section_selection: SelectionStrategy | None = None
+    task_selection: SelectionStrategy | None = None
+
+
+def _selection_for_suffix(args, suffix):
+    if suffix == args.s_suffix:
+        return SelectionStrategy.SEQUENTIAL
+    if suffix == args.p_suffix:
+        return SelectionStrategy.PARALLEL
+    return None
+
+
+def _strategy_from_selections(selections, num):
+    expanded = list(selections)
+    if len(expanded) < num:
+        expanded.extend([expanded[-1]] * (num - len(expanded)))
+
+    if num == 3:
+        return LabelStrategy(
+            project_selection=expanded[0],
+            section_selection=expanded[1],
+            task_selection=expanded[2],
+        )
+    if num == 2:
+        return LabelStrategy(
+            section_selection=expanded[0],
+            task_selection=expanded[1],
+        )
+    if num == 1:
+        return LabelStrategy(task_selection=expanded[0])
+    return None
+
+
+def legacy_type_to_label_strategy(legacy_type):
+    if not legacy_type:
+        return None
+
+    padded_type = legacy_type
+    if len(padded_type) == 2:
+        padded_type = 'x' + padded_type
+    elif len(padded_type) == 1:
+        padded_type = 'xx' + padded_type
+
+    def parse_selection(value):
+        if value == SelectionStrategy.SEQUENTIAL.value:
+            return SelectionStrategy.SEQUENTIAL
+        if value == SelectionStrategy.PARALLEL.value:
+            return SelectionStrategy.PARALLEL
+        return None
+
+    return LabelStrategy(
+        project_selection=parse_selection(padded_type[0]),
+        section_selection=parse_selection(padded_type[1]),
+        task_selection=parse_selection(padded_type[2]),
+    )
+
+
+def label_strategy_to_legacy_type(strategy):
+    if strategy is None:
+        return None
+
+    legacy_type = ''.join(
+        selection.value if selection is not None else 'x'
+        for selection in (
+            strategy.project_selection,
+            strategy.section_selection,
+            strategy.task_selection,
+        )
+    )
+    if legacy_type == 'xxx':
+        return None
+    return legacy_type
+
+
+def parse_label_strategy(args, string, num):
+    if string is None:
+        return None
+    if string == 'Inbox':
+        return None
+
+    suffix_chars = re.escape(args.s_suffix + args.p_suffix)
+    regex = '[%s]{1,%s}$' % (suffix_chars, str(num))
+    re_ind = re.search(regex, string)
+
+    is_ignored_all_projects_project = (
+        args.all_projects
+        and num == 3
+        and args.ignore_suffix
+        and string.endswith("_ignore")
+    )
+
+    if is_ignored_all_projects_project and not re_ind:
+        return None
+
+    if args.all_projects and num == 3 and not re_ind:
+        return LabelStrategy(
+            project_selection=SelectionStrategy.SEQUENTIAL,
+            section_selection=SelectionStrategy.SEQUENTIAL,
+            task_selection=SelectionStrategy.SEQUENTIAL,
+        )
+
+    if not re_ind:
+        return None
+
+    selections = [
+        _selection_for_suffix(args, suffix)
+        for suffix in re_ind[0]
+    ]
+    selections = [selection for selection in selections if selection is not None]
+    if not selections:
+        return None
+
+    return _strategy_from_selections(selections, num)
+
+
 # Find the type based on name suffix.
 
 
 def check_name(args, string, num):
 
     try:
-        # Find inbox or none section as exceptions
-        if string == None:
-            current_type = None
-            pass
-        elif string == 'Inbox':
-            current_type = args.inbox
-            pass
-        else:
-            # Find any = or - symbol at the end of the string. Look at last 3 for projects, 2 for sections, and 1 for tasks
-            regex = '[%s%s]{1,%s}$' % (args.s_suffix, args.p_suffix, str(num))
-            re_ind = re.search(regex, string)
-            
-            # Check if this project should be excluded based on ignore_suffix
-            if args.all_projects and num == 3 and args.ignore_suffix and string.endswith("_ignore"):
-                # Project has the ignore suffix, so don't apply the all_projects logic
-                if re_ind:
-                    suffix = re_ind[0]
-                    
-                    # Somebody put fewer characters than intended. Take last character and apply for every missing one.
-                    if len(suffix) < num:
-                        suffix += suffix[-1] * (num - len(suffix))
-                    
-                    current_type = ''
-                    for s in suffix:
-                        if s == args.s_suffix:
-                            current_type += 's'
-                        elif s == args.p_suffix:
-                            current_type += 'p'
-                else:
-                    current_type = None
-            # If all_projects is enabled and we're checking a project (num=3), and no suffix is found,
-            # treat it as sequential by default
-            elif args.all_projects and num == 3 and not re_ind:
-                current_type = 's' * num
-            else:
-                # Process normally if suffix is found or all_projects is not enabled
-                if re_ind:
-                    suffix = re_ind[0]
-                    
-                    # Somebody put fewer characters than intended. Take last character and apply for every missing one.
-                    if len(suffix) < num:
-                        suffix += suffix[-1] * (num - len(suffix))
-                    
-                    current_type = ''
-                    for s in suffix:
-                        if s == args.s_suffix:
-                            current_type += 's'
-                        elif s == args.p_suffix:
-                            current_type += 'p'
-                else:
-                    current_type = None
+        if string == 'Inbox':
+            return args.inbox
 
-        # Always return a three letter string
-        if current_type and len(current_type) == 2:
-            current_type = 'x' + current_type
-        elif current_type and len(current_type) == 1:
-            current_type = 'xx' + current_type
-
+        current_type = label_strategy_to_legacy_type(
+            parse_label_strategy(args, string, num)
+        )
     except:
         logging.debug("String {} not recognised.".format(string))
         current_type = None
