@@ -107,6 +107,12 @@ class RecordTaskStrategy:
 
 
 @dataclass(frozen=True, slots=True)
+class RecordTaskParentStrategy:
+    task_id: str
+    strategy: SelectionStrategy | None
+
+
+@dataclass(frozen=True, slots=True)
 class PlanningResult:
     label_changes: tuple[LabelChange, ...] = ()
     metadata_commands: tuple[object, ...] = ()
@@ -306,6 +312,70 @@ def plan_parentless_next_action_labels(workspace, config, metadata):
     )
 
 
+def plan_next_action_labels(workspace, config, metadata):
+    parentless_result = plan_parentless_next_action_labels(workspace, config, metadata)
+    tasks_by_id = {task.id: task for task in workspace.tasks}
+    desired_labels = {task.id: tuple(task.labels) for task in workspace.tasks}
+    metadata_commands = list(parentless_result.metadata_commands)
+
+    for label_change in parentless_result.label_changes:
+        desired_labels[label_change.task_id] = label_change.labels
+
+    children_by_parent = _children_by_parent(workspace.tasks)
+    project_strategies = {
+        project.id: parse_label_strategy(config, project.name, 3)
+        for project in workspace.projects
+    }
+    section_strategies = {
+        section.id: parse_label_strategy(config, section.name, 2)
+        for section in workspace.sections
+        if section.id is not None
+    }
+    task_strategies = {
+        task.id: parse_label_strategy(config, task.content, 1)
+        for task in workspace.tasks
+    }
+    sections_by_id = {
+        section.id: section
+        for section in workspace.sections
+        if section.id is not None
+    }
+
+    root_tasks = sorted(
+        [task for task in workspace.tasks if task.parent_id is None],
+        key=lambda task: task.order,
+    )
+    for task in root_tasks:
+        section = sections_by_id.get(task.section_id)
+        dominant_strategy = _dominant_strategy(
+            task_strategies.get(task.id),
+            section_strategies.get(task.section_id),
+            project_strategies.get(task.project_id),
+        )
+        _propagate_child_labels(
+            task=task,
+            inherited_strategy=_child_selection(dominant_strategy),
+            children_by_parent=children_by_parent,
+            desired_labels=desired_labels,
+            next_action_label=config.next_action_label,
+            metadata=metadata,
+            metadata_commands=metadata_commands,
+            task_strategies=task_strategies,
+            section_labeling_disabled=section.is_labeling_disabled if section else False,
+        )
+
+    label_changes = [
+        LabelChange(task_id=task.id, labels=desired_labels[task.id])
+        for task in workspace.tasks
+        if desired_labels[task.id] != task.labels
+    ]
+
+    return PlanningResult(
+        label_changes=tuple(label_changes),
+        metadata_commands=tuple(metadata_commands),
+    )
+
+
 def _sections_by_project(sections):
     result = {}
     for section in sections:
@@ -317,6 +387,14 @@ def _tasks_by_project_section(tasks):
     result = {}
     for task in tasks:
         result.setdefault((task.project_id, task.section_id), []).append(task)
+    return result
+
+
+def _children_by_parent(tasks):
+    result = {}
+    for task in tasks:
+        if task.parent_id is not None:
+            result.setdefault(task.parent_id, []).append(task)
     return result
 
 
@@ -351,6 +429,96 @@ def _dominant_strategy(task_strategy, section_strategy, project_strategy):
     if section_strategy is not None:
         return section_strategy
     return project_strategy
+
+
+def _child_selection(strategy):
+    if strategy is None:
+        return None
+    return strategy.task_selection
+
+
+def _propagate_child_labels(
+    task,
+    inherited_strategy,
+    children_by_parent,
+    desired_labels,
+    next_action_label,
+    metadata,
+    metadata_commands,
+    task_strategies,
+    section_labeling_disabled,
+):
+    children = sorted(children_by_parent.get(task.id, ()), key=lambda child: child.order)
+    if not children or section_labeling_disabled:
+        return
+
+    own_strategy = task_strategies.get(task.id)
+    child_strategy = _child_selection(own_strategy) or inherited_strategy
+    if child_strategy is None:
+        return
+
+    eligible_children = [
+        child
+        for child in children
+        if not child.is_completed and not child.is_header
+    ]
+    for child in eligible_children:
+        _record_parent_strategy(
+            child.id,
+            child_strategy,
+            metadata,
+            metadata_commands,
+        )
+
+    parent_has_label = next_action_label in desired_labels[task.id]
+    if child_strategy == SelectionStrategy.SEQUENTIAL:
+        for child in eligible_children:
+            desired_labels[child.id] = _without_label(
+                desired_labels[child.id],
+                next_action_label,
+            )
+        if parent_has_label and eligible_children:
+            first_child = eligible_children[0]
+            desired_labels[first_child.id] = _with_label(
+                desired_labels[first_child.id],
+                next_action_label,
+            )
+            desired_labels[task.id] = _without_label(
+                desired_labels[task.id],
+                next_action_label,
+            )
+
+    elif child_strategy == SelectionStrategy.PARALLEL and parent_has_label:
+        desired_labels[task.id] = _without_label(
+            desired_labels[task.id],
+            next_action_label,
+        )
+        for child in eligible_children:
+            desired_labels[child.id] = _with_label(
+                desired_labels[child.id],
+                next_action_label,
+            )
+
+    for child in eligible_children:
+        _propagate_child_labels(
+            task=child,
+            inherited_strategy=child_strategy,
+            children_by_parent=children_by_parent,
+            desired_labels=desired_labels,
+            next_action_label=next_action_label,
+            metadata=metadata,
+            metadata_commands=metadata_commands,
+            task_strategies=task_strategies,
+            section_labeling_disabled=section_labeling_disabled,
+        )
+
+
+def _record_parent_strategy(task_id, strategy, metadata, metadata_commands):
+    if metadata.task_parent_strategies.get(task_id) == strategy:
+        return
+    command = RecordTaskParentStrategy(task_id=task_id, strategy=strategy)
+    if command not in metadata_commands:
+        metadata_commands.append(command)
 
 
 def _plan_parentless_task_labels(
