@@ -29,12 +29,14 @@ from next_action_planner import (
     ProjectSnapshot,
     RecordProjectStrategy,
     RecordSectionStrategy,
+    RecordTaskParentStrategy,
     RecordTaskStrategy,
     SectionSnapshot,
     SelectionStrategy,
     TaskSnapshot,
     WorkspaceSnapshot,
     label_strategy_to_legacy_type,
+    plan_next_action_labels,
     plan_parentless_next_action_labels,
     parse_label_strategy,
 )
@@ -747,6 +749,139 @@ class TestParentlessPlanner:
         assert RecordTaskStrategy(
             task_id='t1',
             strategy=LabelStrategy(task_selection=SelectionStrategy.PARALLEL),
+        ) in result.metadata_commands
+
+
+# ---------------------------------------------------------------------------
+# Group 1d: TestChildPropagationPlanner - Child next-action planning
+# ---------------------------------------------------------------------------
+
+class TestChildPropagationPlanner:
+    LABEL = 'next_action'
+
+    def _project(self, name='Work -'):
+        return ProjectSnapshot(
+            id='p1',
+            name=name,
+            order=1,
+            is_inbox_project=False,
+        )
+
+    def _section(self):
+        return SectionSnapshot(
+            id='s1',
+            name=None,
+            project_id='p1',
+            order=1,
+        )
+
+    def _task(self, id, parent_id=None, labels=(), order=1, is_completed=False, is_header=False):
+        return TaskSnapshot(
+            id=id,
+            content='Task',
+            project_id='p1',
+            section_id='s1',
+            parent_id=parent_id,
+            labels=tuple(labels),
+            order=order,
+            is_completed=is_completed,
+            is_header=is_header,
+        )
+
+    def _workspace(self, tasks, project_name='Work -'):
+        return WorkspaceSnapshot(
+            projects=(self._project(project_name),),
+            sections=(self._section(),),
+            tasks=tasks,
+        )
+
+    def _plan(self, workspace, metadata=None):
+        return plan_next_action_labels(
+            workspace,
+            PlannerConfig(next_action_label=self.LABEL),
+            metadata or AutodoistMetadataSnapshot(),
+        )
+
+    def test_sequential_child_propagation_labels_first_child(self):
+        workspace = self._workspace((
+            self._task('parent', order=1),
+            self._task('child-1', parent_id='parent', order=1),
+            self._task('child-2', parent_id='parent', order=2),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='child-1', labels=(self.LABEL,)),
+        )
+
+    def test_parallel_child_propagation_labels_all_children(self):
+        workspace = self._workspace((
+            self._task('parent', order=1),
+            self._task('child-1', parent_id='parent', order=1),
+            self._task('child-2', parent_id='parent', order=2),
+        ), project_name='Work =')
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='child-1', labels=(self.LABEL,)),
+            LabelChange(task_id='child-2', labels=(self.LABEL,)),
+        )
+
+    def test_sequential_child_propagation_moves_label_after_reorder(self):
+        workspace = self._workspace((
+            self._task('parent', labels=(self.LABEL,), order=1),
+            self._task('old-first', parent_id='parent', labels=(self.LABEL,), order=2),
+            self._task('new-first', parent_id='parent', order=1),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='parent', labels=()),
+            LabelChange(task_id='old-first', labels=()),
+            LabelChange(task_id='new-first', labels=(self.LABEL,)),
+        )
+
+    def test_nested_sequential_propagation_pushes_label_to_lowest_first_child(self):
+        workspace = self._workspace((
+            self._task('parent', order=1),
+            self._task('child', parent_id='parent', order=1),
+            self._task('grandchild', parent_id='child', order=1),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='grandchild', labels=(self.LABEL,)),
+        )
+
+    def test_completed_and_headered_children_are_not_labeled(self):
+        workspace = self._workspace((
+            self._task('parent', order=1),
+            self._task('done', parent_id='parent', order=1, is_completed=True),
+            self._task('header', parent_id='parent', order=2, is_header=True),
+            self._task('eligible', parent_id='parent', order=3),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='eligible', labels=(self.LABEL,)),
+        )
+
+    def test_parent_strategy_propagation_uses_metadata_command(self):
+        workspace = self._workspace((
+            self._task('parent', order=1),
+            self._task('child', parent_id='parent', order=1),
+        ))
+
+        result = self._plan(workspace)
+
+        assert RecordTaskParentStrategy(
+            task_id='child',
+            strategy=SelectionStrategy.SEQUENTIAL,
         ) in result.metadata_commands
 
 
