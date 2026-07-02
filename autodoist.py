@@ -9,7 +9,7 @@ import time
 import requests
 import argparse
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import sqlite3
 import os
 import re
@@ -467,6 +467,46 @@ def call_status_url(url):
         logging.warning(f'Failed to call status URL {url}: {e}')
     except Exception as e:
         logging.warning(f'Unexpected error calling status URL {url}: {e}')
+
+
+def normalise_due_date(due):
+    if due is None:
+        return None
+
+    due_value = getattr(due, 'date', None)
+    if due_value is None:
+        due_value = getattr(due, 'datetime', None)
+
+    if due_value is None:
+        return None
+
+    if isinstance(due_value, datetime):
+        return due_value.date()
+
+    if isinstance(due_value, date):
+        return due_value
+
+    if isinstance(due_value, str):
+        try:
+            return datetime.fromisoformat(due_value.replace('Z', '+00:00')).date()
+        except ValueError:
+            try:
+                return datetime.strptime(due_value, "%Y-%m-%d").date()
+            except ValueError:
+                logging.warning("Could not parse due date value: %s", due_value)
+
+    return None
+
+
+def is_hidden_future_task(task, hide_future):
+    if hide_future <= 0:
+        return False
+
+    due_date = normalise_due_date(task.due)
+    if due_date is None:
+        return False
+
+    return (due_date - date.today()).days >= hide_future
 
 # Find the type based on name suffix.
 
@@ -1321,18 +1361,9 @@ def autodoist_magic(args, api, connection):
                     # Remove labels based on start / due dates
 
                     # If task is too far in the future, remove the next_action tag and skip
-                    try:
-                        if args.hide_future > 0 and task.due.date is not None:
-                            due_date = datetime.strptime(
-                                task.due.date, "%Y-%m-%d")
-                            future_diff = (
-                                due_date - datetime.today()).days
-                            if future_diff >= args.hide_future:
-                                remove_label(
-                                    task, next_action_label, overview_task_ids, overview_task_labels)
-                    except:
-                        # Hide-future not set, skip
-                        pass
+                    if is_hidden_future_task(task, args.hide_future):
+                        remove_label(
+                            task, next_action_label, overview_task_ids, overview_task_labels)
 
                     # If start-date has not passed yet, remove label
                     try:

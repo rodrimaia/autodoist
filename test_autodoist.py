@@ -10,6 +10,7 @@ import sys
 import types
 import argparse
 import sqlite3
+from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch, PropertyMock
 from dataclasses import dataclass, field
 from typing import Optional
@@ -62,6 +63,12 @@ class FakeProject:
     name: str
     is_inbox_project: bool = False
     order: int = 0
+
+
+@dataclass
+class FakeDue:
+    date: object
+    is_recurring: bool = False
 
 
 # Patch todoist imports before importing autodoist
@@ -698,6 +705,30 @@ class TestIntegration:
 
         assert self.LABEL not in tasks[0].labels
         assert self.LABEL in tasks[1].labels
+
+    def test_hide_future_skips_task_with_sdk_date_object(self):
+        """Future tasks should not get the label when SDK returns a date object."""
+        project = FakeProject(id="p1", name="Work -")
+        task = make_task("t1", project_id="p1", order=0)
+        task.due = FakeDue(date=date.today() + timedelta(days=365))
+
+        (ids, labels, _), _ = self._run([project], [], [task], hide_future=14)
+
+        assert self.LABEL not in task.labels
+        assert ids == {"t1": 0}
+        assert labels == {"t1": []}
+
+    def test_hide_future_skips_task_with_sdk_datetime_object(self):
+        """Future tasks should not get the label when SDK returns a datetime object."""
+        project = FakeProject(id="p1", name="Work -")
+        task = make_task("t1", project_id="p1", order=0)
+        task.due = FakeDue(date=datetime.now() + timedelta(days=365))
+
+        (ids, labels, _), _ = self._run([project], [], [task], hide_future=14)
+
+        assert self.LABEL not in task.labels
+        assert ids == {"t1": 0}
+        assert labels == {"t1": []}
 
     def test_headered_tasks_skipped(self):
         """Tasks starting with '*' should not get the label."""
