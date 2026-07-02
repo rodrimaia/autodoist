@@ -68,6 +68,7 @@ class TaskSnapshot:
     is_completed: bool = False
     due_date: date | None = None
     is_header: bool = False
+    description: str = ''
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +90,12 @@ class AutodoistMetadataSnapshot:
 class LabelChange:
     task_id: str
     labels: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class DescriptionChange:
+    task_id: str
+    description: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +125,14 @@ class RecordTaskParentStrategy:
 @dataclass(frozen=True, slots=True)
 class PlanningResult:
     label_changes: tuple[LabelChange, ...] = ()
+    description_changes: tuple[DescriptionChange, ...] = ()
     metadata_commands: tuple[object, ...] = ()
+
+
+INACTIVE_RELATIVE_ACTIONABLE_DATE_WARNING = (
+    'Autodoist warning: `start=due-*` needs a Todoist due date. '
+    'This task will be treated as if the marker is inactive until a due date is set.'
+)
 
 
 def _selection_for_suffix(args, suffix):
@@ -380,6 +394,9 @@ def plan_next_action_labels(workspace, config, metadata):
         desired_labels,
         config,
     )
+    description_changes = _inactive_relative_marker_description_changes(
+        workspace.tasks,
+    )
 
     label_changes = [
         LabelChange(task_id=task.id, labels=desired_labels[task.id])
@@ -389,6 +406,7 @@ def plan_next_action_labels(workspace, config, metadata):
 
     return PlanningResult(
         label_changes=tuple(label_changes),
+        description_changes=tuple(description_changes),
         metadata_commands=tuple(metadata_commands),
     )
 
@@ -594,6 +612,44 @@ def _relative_start_date_is_future(task, today):
     days = amount if unit == 'd' else amount * 7
     start_date = task.due_date - timedelta(days=days)
     return (today - start_date).days < 0
+
+
+def _inactive_relative_marker_description_changes(tasks):
+    changes = []
+    for task in tasks:
+        has_inactive_marker = _has_relative_start_date_marker(task) and task.due_date is None
+        description = task.description or ''
+
+        if has_inactive_marker:
+            new_description = _prepend_inactive_relative_marker_warning(description)
+        else:
+            new_description = _remove_inactive_relative_marker_warning(description)
+
+        if new_description != description:
+            changes.append(DescriptionChange(task.id, new_description))
+
+    return changes
+
+
+def _has_relative_start_date_marker(task):
+    return re.search(r'start=due-\d+[dw]', task.content) is not None
+
+
+def _prepend_inactive_relative_marker_warning(description):
+    if description.startswith(INACTIVE_RELATIVE_ACTIONABLE_DATE_WARNING):
+        return description
+    if description:
+        return f'{INACTIVE_RELATIVE_ACTIONABLE_DATE_WARNING}\n\n{description}'
+    return INACTIVE_RELATIVE_ACTIONABLE_DATE_WARNING
+
+
+def _remove_inactive_relative_marker_warning(description):
+    warning = INACTIVE_RELATIVE_ACTIONABLE_DATE_WARNING
+    if description == warning:
+        return ''
+    if description.startswith(f'{warning}\n\n'):
+        return description[len(warning) + 2:]
+    return description
 
 
 def _remove_label_from_task_tree(task, children_by_parent, desired_labels, label):

@@ -1,3 +1,27 @@
+2026-07-02 - Issue #16: Surface inactive relative actionable date markers in task descriptions
+
+Changed:
+- Added planner description changes for inactive relative actionable date markers: tasks containing `start=due-*` without a Todoist due date now get a prepended Autodoist warning while keeping normal next-action label behavior.
+- Added idempotent warning handling so later sync loops do not duplicate the warning.
+- Added warning cleanup when the marker becomes evaluable again, preserving the user's existing description text.
+- Wired description changes through the sync loop so Todoist receives `api.update_task(..., description=...)` for affected tasks.
+
+Verification:
+- `uv run pytest test_autodoist.py -k 'ActionableDatePlanner or inactive_relative_start_due_marker_updates_task_description' -q` -> 20 passed, 107 deselected.
+- `uv run pytest -q` -> 134 passed.
+
+Decisions:
+- Kept inactive relative actionable date marker handling separate from label eligibility so missing due dates do not suppress next-action labeling.
+- Removed only the exact warning when it appears as the prepended block, so user-authored description text is preserved.
+- Treated description updates as planner output alongside label changes, with the API write applied in the existing sync-loop integration layer.
+- README.md already documents `start=due-*`; no README update was needed for this internal warning behavior.
+
+Blockers:
+- None.
+
+Next recommended task:
+- Check GitHub for the next `ready-for-agent` issue after #16 is closed.
+
 2026-07-02 - Issue #14: Lock boundary behavior for actionable dates and hide-future
 
 Changed:

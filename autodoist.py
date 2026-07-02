@@ -637,6 +637,7 @@ def build_workspace_snapshot(projects, sections, tasks):
                 is_completed=task.is_completed,
                 due_date=normalise_due_date(task.due),
                 is_header=task.content.startswith('*'),
+                description=task.description,
             )
             for task in tasks
         ),
@@ -714,6 +715,22 @@ def apply_planner_label_changes(tasks_by_id, label_changes, overview_task_ids, o
         task.labels = final_labels
         overview_task_ids[task.id] = 1
         overview_task_labels[task.id] = final_labels
+
+
+def apply_planner_description_changes(api, tasks_by_id, description_changes):
+    num_updates = 0
+    for description_change in description_changes:
+        task = tasks_by_id[description_change.task_id]
+        if task.description == description_change.description:
+            continue
+
+        api.update_task(
+            task_id=task.id,
+            description=description_change.description,
+        )
+        task.description = description_change.description
+        num_updates += 1
+    return num_updates
 
 
 def _read_metadata_value(connection, model, column):
@@ -1302,6 +1319,11 @@ def autodoist_magic(args, api, connection):
             planning_result.label_changes,
             overview_task_ids,
             overview_task_labels,
+        )
+        num_updates += apply_planner_description_changes(
+            api,
+            tasks_by_id,
+            planning_result.description_changes,
         )
 
     # Return all ids and corresponding labels that need to be modified

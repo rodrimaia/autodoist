@@ -23,6 +23,8 @@ import pytest
 
 from next_action_planner import (
     AutodoistMetadataSnapshot,
+    DescriptionChange,
+    INACTIVE_RELATIVE_ACTIONABLE_DATE_WARNING,
     LabelChange,
     LabelStrategy,
     PlannerConfig,
@@ -863,6 +865,7 @@ class TestActionableDatePlanner:
         self,
         id,
         content='Task',
+        description='',
         parent_id=None,
         labels=(),
         order=1,
@@ -873,6 +876,7 @@ class TestActionableDatePlanner:
         return TaskSnapshot(
             id=id,
             content=content,
+            description=description,
             project_id='p1',
             section_id='s1',
             parent_id=parent_id,
@@ -938,6 +942,66 @@ class TestActionableDatePlanner:
 
         assert result.label_changes == (
             LabelChange(task_id='child', labels=()),
+        )
+
+    def test_inactive_relative_start_date_marker_keeps_next_action_behavior_and_adds_warning(self):
+        workspace = self._workspace((
+            self._task(
+                'task',
+                content='Task start=due-2d',
+                description='Existing details',
+                order=1,
+            ),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='task', labels=(self.LABEL,)),
+        )
+        assert result.description_changes == (
+            DescriptionChange(
+                task_id='task',
+                description=(
+                    f'{INACTIVE_RELATIVE_ACTIONABLE_DATE_WARNING}\n\n'
+                    'Existing details'
+                ),
+            ),
+        )
+
+    def test_inactive_relative_start_date_marker_warning_is_idempotent(self):
+        description = f'{INACTIVE_RELATIVE_ACTIONABLE_DATE_WARNING}\n\nExisting details'
+        workspace = self._workspace((
+            self._task(
+                'task',
+                content='Task start=due-2d',
+                description=description,
+                order=1,
+            ),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.description_changes == ()
+
+    def test_due_date_removes_inactive_relative_start_date_marker_warning_only(self):
+        workspace = self._workspace((
+            self._task(
+                'task',
+                content='Task start=due-2d',
+                description=(
+                    f'{INACTIVE_RELATIVE_ACTIONABLE_DATE_WARNING}\n\n'
+                    'Existing details'
+                ),
+                order=1,
+                due_date=self.TODAY,
+            ),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.description_changes == (
+            DescriptionChange(task_id='task', description='Existing details'),
         )
 
     def test_due_relative_zero_day_start_allows_task_label_on_due_date(self):
@@ -1658,6 +1722,35 @@ class TestIntegration:
         assert ids == {"c1": 1}
         assert labels == {"c1": []}
         assert "Wrong start-date format" not in caplog.text
+
+    def test_inactive_relative_start_due_marker_updates_task_description(self):
+        project = FakeProject(id="p1", name="Work -")
+        task = make_task(
+            "t1",
+            content="Task start=due-2d",
+            project_id="p1",
+            order=0,
+        )
+        task.description = "Existing details"
+
+        api = self._make_api([project], [], [task])
+        args = self._make_args()
+        conn = create_test_db()
+        try:
+            from autodoist import autodoist_magic
+            ids, labels, num_updates = autodoist_magic(args, api, conn)
+        finally:
+            conn.close()
+
+        description = f'{INACTIVE_RELATIVE_ACTIONABLE_DATE_WARNING}\n\nExisting details'
+        api.update_task.assert_called_once_with(
+            task_id="t1",
+            description=description,
+        )
+        assert task.description == description
+        assert ids == {"t1": 1}
+        assert labels == {"t1": [self.LABEL]}
+        assert num_updates == 1
 
     def test_shifted_end_of_day_accepts_sdk_date_object_for_recurring_task(self):
         """Shifted end-of-day should compare recurring due dates from SDK date objects."""
