@@ -393,35 +393,6 @@ def initialise_api(args):
 
     return api
 
-# Check for Autodoist update
-
-
-def check_for_update(current_version):
-    updateurl = 'https://api.github.com/repos/Hoffelhas/autodoist/releases'
-
-    try:
-        r = requests.get(updateurl)
-        r.raise_for_status()
-        release_info_json = r.json()
-
-        if not current_version == release_info_json[0]['tag_name']:
-            logging.warning("\n\nYour version is not up-to-date! \nYour version: {}. Latest version: {}\nFind the latest version at: {}\n".format(
-                current_version, release_info_json[0]['tag_name'], release_info_json[0]['html_url']))
-            return 1
-        else:
-            return 0
-    except requests.exceptions.ConnectionError as e:
-        logging.error(
-            "Error while checking for updates (Connection error): {}".format(e))
-        return 1
-    except requests.exceptions.HTTPError as e:
-        logging.error(
-            "Error while checking for updates (HTTP error): {}".format(e))
-        return 1
-    except requests.exceptions.RequestException as e:
-        logging.error("Error while checking for updates: {}".format(e))
-        return 1
-
 # Update a task's content via REST API
 
 
@@ -1444,9 +1415,6 @@ def autodoist_magic(args, api, connection):
 
 def main():
 
-    # Version
-    current_version = 'v2.0'
-
     # Main process functions.
     parser = argparse.ArgumentParser(
         formatter_class=make_wide(argparse.HelpFormatter, w=120, h=60))
@@ -1504,9 +1472,6 @@ def main():
                             'debug.log', 'w+', 'utf-8'),
                             logging.StreamHandler()]
                         )
-
-    # Check for updates
-    check_for_update(current_version)
 
     # Initialise api
     api = initialise_api(args)
