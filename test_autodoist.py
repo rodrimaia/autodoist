@@ -908,12 +908,19 @@ class TestActionableDatePlanner:
         workspace = self._workspace((
             self._task('parent', content='Parent start=05-07-2026', order=1),
             self._task('child', parent_id='parent', labels=(self.LABEL,), order=1),
+            self._task(
+                'grandchild',
+                parent_id='child',
+                labels=(self.LABEL,),
+                order=1,
+            ),
         ))
 
         result = self._plan(workspace)
 
         assert result.label_changes == (
             LabelChange(task_id='child', labels=()),
+            LabelChange(task_id='grandchild', labels=()),
         )
 
     def test_due_relative_start_date_removes_task_tree_labels_until_start(self):

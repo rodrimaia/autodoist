@@ -1,3 +1,24 @@
+2026-07-02 - Issue #13: Cover nested actionable date marker cleanup
+
+Changed:
+- Strengthened the absolute actionable-date planner regression test so the hidden parent tree includes parent -> child -> grandchild.
+- Verified stale `next_action` labels are removed from both the direct child and grandchild while the parent's actionable date marker is still in the future.
+
+Verification:
+- `uv run pytest test_autodoist.py -k 'ActionableDatePlanner' -q` -> 13 passed, 107 deselected.
+- `uv run pytest -q` -> 127 passed.
+
+Decisions:
+- Updated the existing `test_absolute_start_date_removes_task_tree_labels_until_start` test because it already described task-tree cleanup but only exercised a direct child.
+- Used an absolute future actionable date marker as the regression fixture; weekly relative markers already had separate grandchild coverage.
+- Review pass found no standards or spec issues; the review sub-agent workflow was skipped because no Agent tool is exposed in this environment.
+
+Blockers:
+- None.
+
+Next recommended task:
+- Issue #14: Lock boundary behavior for actionable dates and hide-future.
+
 2026-07-02 - Issue #12: Cover weekly relative actionable date markers
 
 Changed:
