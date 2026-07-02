@@ -68,3 +68,4 @@ target/
 
 # Runtime artifacts
 metadata.sqlite
+progress.txt
