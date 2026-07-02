@@ -1,0 +1,19 @@
+2026-07-02 - Issue #11: Cover absolute actionable date markers before hide-future filtering
+
+Changed:
+- Added planner regression coverage for a parent task with `start=DD-MM-YYYY`, a future due date hidden by `hide_future`, and a stale descendant `next_action` label.
+- Kept actionable date marker cleanup ahead of `hide_future` filtering in `_apply_actionable_date_filters`, so a hidden parent still clears stale descendant labels before the parent is filtered.
+
+Verification:
+- `uv run pytest test_autodoist.py -k 'ActionableDatePlanner' -q` -> 9 passed, 107 deselected.
+- `uv run pytest test_autodoist.py -q` -> 116 passed.
+
+Decisions:
+- Treated actionable date marker cleanup as tree-level maintenance that must run before parent-only hide-future filtering.
+- Preserved existing parent behavior: the parent hidden by `hide_future` is not labelled, while stale descendant labels are removed.
+
+Blockers:
+- None.
+
+Next recommended task:
+- Issue #12: Cover weekly relative actionable date markers.

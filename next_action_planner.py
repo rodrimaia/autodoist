@@ -541,13 +541,6 @@ def _record_parent_strategy(task_id, strategy, metadata, metadata_commands):
 def _apply_actionable_date_filters(tasks, children_by_parent, desired_labels, config):
     today = config.today or date.today()
     for task in tasks:
-        if _is_hidden_future_task(task, config.hide_future, today):
-            desired_labels[task.id] = _without_label(
-                desired_labels[task.id],
-                config.next_action_label,
-            )
-            continue
-
         if _absolute_start_date_is_future(task, config.dateformat, today):
             _remove_label_from_task_tree(
                 task,
@@ -562,6 +555,13 @@ def _apply_actionable_date_filters(tasks, children_by_parent, desired_labels, co
                 task,
                 children_by_parent,
                 desired_labels,
+                config.next_action_label,
+            )
+            continue
+
+        if _is_hidden_future_task(task, config.hide_future, today):
+            desired_labels[task.id] = _without_label(
+                desired_labels[task.id],
                 config.next_action_label,
             )
 
