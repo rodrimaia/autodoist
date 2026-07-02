@@ -8,6 +8,14 @@ Autodoist is a long-running Todoist automation process that labels actionable ta
 The checks Autodoist performs once before entering the sync loop, such as validating the Todoist API key, connecting to Todoist, and confirming required labels exist.
 _Avoid_: startup sync, boot logic
 
+**Startup retry window**:
+The bounded period during startup verification where Autodoist retries temporary Todoist API failures before exiting and letting the runtime decide what happens next.
+_Avoid_: infinite startup retry, retry loop
+
+**Temporary Todoist failure**:
+A Todoist API failure that may resolve without a configuration change, such as rate limiting, server errors, connection errors, or timeouts.
+_Avoid_: configuration error, invalid token
+
 **Required label**:
 A Todoist label that Autodoist needs to exist before a configured feature can run correctly, such as the next-action label used by automatic task labelling.
 _Avoid_: startup label, checked label

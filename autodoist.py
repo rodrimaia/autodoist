@@ -15,6 +15,10 @@ import os
 import re
 import json
 
+STARTUP_RETRY_WINDOW_SECONDS = 600
+STARTUP_RETRY_INITIAL_DELAY_SECONDS = 5
+STARTUP_RETRY_MAX_DELAY_SECONDS = 60
+
 # Connect to SQLite database
 
 
@@ -272,13 +276,64 @@ def query_yes_no(question, default="yes"):
             sys.stdout.write("Please respond with 'yes' or 'no' "
                              "(or 'y' or 'n').\n")
 
+
+def is_temporary_todoist_error(error):
+    if isinstance(error, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
+        return True
+
+    if isinstance(error, requests.exceptions.HTTPError):
+        status_code = getattr(getattr(error, 'response', None), 'status_code', None)
+        return status_code == 429 or (
+            status_code is not None and 500 <= status_code < 600)
+
+    return False
+
+
+def get_labels_with_startup_retry(
+        api,
+        label_name,
+        sleep=time.sleep,
+        monotonic=time.monotonic,
+        retry_window_seconds=STARTUP_RETRY_WINDOW_SECONDS,
+        initial_delay_seconds=STARTUP_RETRY_INITIAL_DELAY_SECONDS,
+        max_delay_seconds=STARTUP_RETRY_MAX_DELAY_SECONDS):
+    start_time = monotonic()
+    delay_seconds = initial_delay_seconds
+
+    while True:
+        try:
+            return [label for page in api.get_labels() for label in page]
+        except Exception as error:
+            if not is_temporary_todoist_error(error):
+                raise
+
+            elapsed_seconds = monotonic() - start_time
+            remaining_seconds = retry_window_seconds - elapsed_seconds
+            if remaining_seconds <= 0:
+                logging.error(
+                    "Todoist temporary failure persisted while verifying required label '%s' for %dm; exiting.",
+                    label_name,
+                    retry_window_seconds // 60)
+                sys.exit(1)
+
+            retry_in_seconds = min(
+                delay_seconds, max_delay_seconds, remaining_seconds)
+            logging.warning(
+                "Todoist temporary failure while verifying required label '%s': %s. Retrying in %ds (startup retry window remaining: %ds).",
+                label_name,
+                error,
+                retry_in_seconds,
+                int(remaining_seconds))
+            sleep(retry_in_seconds)
+            delay_seconds = min(delay_seconds * 2, max_delay_seconds)
+
 # Check if label exists, if not, create it
 
 
 def verify_label_existance(api, label_name, prompt_mode):
     # Check the regeneration label exists
     # In API v3, get_labels() returns a paginator that yields pages (lists)
-    labels = [label for page in api.get_labels() for label in page]
+    labels = get_labels_with_startup_retry(api, label_name)
     label = [x for x in labels if x.name == label_name]
 
     if len(label) > 0:
@@ -297,10 +352,7 @@ def verify_label_existance(api, label_name, prompt_mode):
             response = True
 
         if response:
-            try:
-                api.add_label(name=label_name)
-            except Exception as error:
-                logging.warning(error)
+            api.add_label(name=label_name)
 
             # In API v3, get_labels() returns a paginator
             labels = [label for page in api.get_labels() for label in page]

@@ -10,6 +10,7 @@ import sys
 import types
 import argparse
 import sqlite3
+import requests
 from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch, PropertyMock
 from dataclasses import dataclass, field
@@ -66,6 +67,12 @@ class FakeProject:
 
 
 @dataclass
+class FakeLabel:
+    id: str
+    name: str
+
+
+@dataclass
 class FakeDue:
     date: object
     is_recurring: bool = False
@@ -88,7 +95,8 @@ from autodoist import (
     check_name, add_label, remove_label,
     get_type, get_project_type, get_section_type, get_task_type,
     db_check_existance, db_read_value, db_update_value,
-    execute_query, execute_read_query,
+    execute_query, execute_read_query, get_labels_with_startup_retry,
+    initialise_api, verify_label_existance,
 )
 
 
@@ -151,6 +159,14 @@ def create_test_db():
     return conn
 
 
+def http_error(status_code):
+    response = requests.Response()
+    response.status_code = status_code
+    error = requests.exceptions.HTTPError(
+        f"{status_code} error", response=response)
+    return error
+
+
 def apply_parentless_task_logic(task, next_action_label, dominant_type, first_found,
                                 overview_task_ids, overview_task_labels):
     """Replicate the parentless task labeling logic from autodoist.py lines 1197-1258.
@@ -204,6 +220,101 @@ def apply_parentless_task_logic(task, next_action_label, dominant_type, first_fo
 
     elif dominant_type[1] == 'x' and dominant_type[2] == 'p':
         add_label(task, next_action_label, overview_task_ids, overview_task_labels)
+
+
+# ---------------------------------------------------------------------------
+# Group 0: TestStartupVerification - Required label startup checks
+# ---------------------------------------------------------------------------
+
+class TestStartupVerification:
+    LABEL = "next_action"
+
+    def test_get_labels_retries_temporary_error_then_returns_labels(self):
+        api = MagicMock()
+        labels = [FakeLabel(id="1", name=self.LABEL)]
+        api.get_labels.side_effect = [
+            http_error(429),
+            [labels],
+        ]
+        sleep = MagicMock()
+        monotonic = MagicMock(side_effect=[0, 0])
+
+        result = get_labels_with_startup_retry(
+            api, self.LABEL, sleep=sleep, monotonic=monotonic)
+
+        assert result == labels
+        assert api.get_labels.call_count == 2
+        sleep.assert_called_once_with(5)
+
+    def test_get_labels_uses_exponential_backoff_until_success(self):
+        api = MagicMock()
+        labels = [FakeLabel(id="1", name=self.LABEL)]
+        api.get_labels.side_effect = [
+            http_error(429),
+            http_error(500),
+            [labels],
+        ]
+        sleep = MagicMock()
+        monotonic = MagicMock(side_effect=[0, 0, 5])
+
+        result = get_labels_with_startup_retry(
+            api, self.LABEL, sleep=sleep, monotonic=monotonic)
+
+        assert result == labels
+        assert [call.args[0] for call in sleep.call_args_list] == [5, 10]
+
+    def test_get_labels_fails_fast_for_auth_error(self):
+        api = MagicMock()
+        api.get_labels.side_effect = http_error(401)
+        sleep = MagicMock()
+
+        with pytest.raises(requests.exceptions.HTTPError):
+            get_labels_with_startup_retry(api, self.LABEL, sleep=sleep)
+
+        assert api.get_labels.call_count == 1
+        sleep.assert_not_called()
+
+    def test_get_labels_exits_after_retry_window_expires(self):
+        api = MagicMock()
+        api.get_labels.side_effect = http_error(429)
+        sleep = MagicMock()
+        monotonic = MagicMock(side_effect=[0, 601])
+
+        with pytest.raises(SystemExit) as error:
+            get_labels_with_startup_retry(
+                api, self.LABEL, sleep=sleep, monotonic=monotonic)
+
+        assert error.value.code == 1
+        assert api.get_labels.call_count == 1
+        sleep.assert_not_called()
+
+    def test_initialise_api_verifies_label_with_startup_retry(self):
+        args = argparse.Namespace(
+            api_key="fake",
+            label=self.LABEL,
+            regeneration=None,
+            end=None,
+        )
+        api = MagicMock()
+
+        with patch("autodoist.TodoistAPI", return_value=api), \
+                patch("autodoist.verify_label_existance") as verify_label:
+            result = initialise_api(args)
+
+        assert result is api
+        verify_label.assert_called_once_with(api, self.LABEL, 1)
+
+    def test_label_creation_errors_are_not_retried(self):
+        api = MagicMock()
+        api.get_labels.return_value = [[]]
+        api.add_label.side_effect = http_error(429)
+
+        with patch("autodoist.query_yes_no", return_value=True), \
+                pytest.raises(requests.exceptions.HTTPError):
+            verify_label_existance(api, self.LABEL, 1)
+
+        api.add_label.assert_called_once_with(name=self.LABEL)
+        assert api.get_labels.call_count == 1
 
 
 # ---------------------------------------------------------------------------
