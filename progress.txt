@@ -18,3 +18,29 @@ Blockers:
 
 Next recommended task:
 - Migrate remaining stale-label cleanup cases for label strategy changes into direct planner tests and remove any legacy/copy-logic tests that no longer exercise production behavior.
+
+2026-07-02
+
+Completed task:
+- Issue #9: replaced tests that copied production next-action label branches with tests that exercise the planner interface.
+- Removed the copied parentless task branching helper from `test_autodoist.py`.
+- Replaced parentless hierarchy tests with snapshot-based planner tests for project, section, and task strategy inheritance, including sequential, parallel, and stale-label cleanup cases.
+- Removed child propagation loop simulations from `test_labeling.py`; child propagation remains covered through `TestChildPropagationPlanner`.
+- Kept `test_labeling.py` focused on the Todoist label update helpers and their overview update maps.
+
+Verification:
+- `uv run pytest test_autodoist.py::TestParentlessPlanner test_autodoist.py::TestChildPropagationPlanner test_autodoist.py::TestActionableDatePlanner test_autodoist.py::TestHierarchyTypeResolution test_labeling.py` -> 37 passed.
+- `uv run pytest` -> 121 passed.
+- `git diff --check` -> passed.
+- No static type checker is configured in this repo; `uv run python -m compileall autodoist.py next_action_planner.py test_autodoist.py test_labeling.py` -> passed.
+
+Decisions made:
+- Treated the planner interface as the permanent seam for next-action behavior tests.
+- Left legacy suffix/parser compatibility tests in place because they still protect public legacy behavior.
+- Did not change production behavior for this cleanup slice.
+
+Blockers:
+- None.
+
+Next recommended task:
+- Review GitHub labels/statuses for issues #2-#9 after this commit; the PRD issue #2 should remain a tracking PRD rather than a ready-for-agent implementation task.

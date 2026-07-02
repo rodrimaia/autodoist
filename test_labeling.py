@@ -1,7 +1,8 @@
-"""Tests for the label propagation logic in autodoist.
+"""Tests for Todoist label update helpers in autodoist.
 
-These tests mock Todoist models and verify that add_label/remove_label
-and the sequential propagation logic work correctly.
+These tests mock Todoist models and verify that add_label/remove_label keep
+the overview update maps consistent. Next-action propagation behavior is
+covered through the planner interface in test_autodoist.py.
 
 Run with: python -m pytest test_labeling.py -v
 """
@@ -155,132 +156,6 @@ class TestRemoveLabel:
 
         assert "next_action" not in task.labels
         assert "other" in task.labels
-
-
-# ---------------------------------------------------------------------------
-# Tests for sequential propagation behavior
-# ---------------------------------------------------------------------------
-
-class TestSequentialPropagation:
-    """Simulates the sequential labeling loop from autodoist_magic (lines 1395-1416).
-
-    In sequential mode, only the FIRST non-completed child should get the label.
-    This relies on:
-    1. add_label mutating task.labels in-place (so the parent "has" the label)
-    2. remove_label mutating task.labels in-place (so after removing from parent,
-       subsequent children don't see it)
-    """
-
-    def _make_task(self, id, content, parent_id, order, labels=None):
-        return FakeTask(
-            id=id, content=content, project_id="p1", section_id=None,
-            parent_id=parent_id, labels=labels or [], order=order,
-        )
-
-    def test_first_child_gets_label_on_first_iteration(self):
-        """On the first iteration, the parent gets labeled at line 1342,
-        then the label propagates to the first child within the same iteration."""
-        parent = self._make_task("100", "Parent", None, 0)
-        child1 = self._make_task("201", "Child 1", "100", 0)
-        child2 = self._make_task("202", "Child 2", "100", 1)
-
-        ids, labels_map = {}, {}
-        next_action_label = "next_action"
-
-        # Step 1: Parent gets labeled (simulates line 1342)
-        add_label(parent, next_action_label, ids, labels_map)
-        assert next_action_label in parent.labels
-
-        # Step 2: Sequential propagation loop (simulates lines 1397-1416)
-        child_tasks = [child1, child2]
-        for child_task in child_tasks:
-            if child_task.content.startswith('*'):
-                continue
-            remove_label(child_task, next_action_label, ids, labels_map)
-            if not child_task.is_completed and next_action_label in parent.labels:
-                add_label(child_task, next_action_label, ids, labels_map)
-                remove_label(parent, next_action_label, ids, labels_map)
-
-        # Verify: only child1 has label, parent lost it
-        assert next_action_label in child1.labels, "first child should have label"
-        assert next_action_label not in child2.labels, "second child should NOT have label"
-        assert next_action_label not in parent.labels, "parent should have lost label"
-
-    def test_second_iteration_propagates_deeper(self):
-        """On the second iteration, child1 (now labeled from API) propagates
-        to its own first child."""
-        child1 = self._make_task("201", "Child 1", "100", 0,
-                                 labels=["next_action"])  # has label from previous sync
-        grandchild1 = self._make_task("301", "Grandchild 1", "201", 0)
-        grandchild2 = self._make_task("302", "Grandchild 2", "201", 1)
-
-        ids, labels_map = {}, {}
-        next_action_label = "next_action"
-
-        # child1 already has the label (from API), so add_label is a no-op
-        add_label(child1, next_action_label, ids, labels_map)
-
-        # Sequential propagation for child1's children
-        grandchildren = [grandchild1, grandchild2]
-        for gc in grandchildren:
-            remove_label(gc, next_action_label, ids, labels_map)
-            if not gc.is_completed and next_action_label in child1.labels:
-                add_label(gc, next_action_label, ids, labels_map)
-                remove_label(child1, next_action_label, ids, labels_map)
-
-        assert next_action_label in grandchild1.labels, "first grandchild should have label"
-        assert next_action_label not in grandchild2.labels, "second grandchild should NOT"
-        assert next_action_label not in child1.labels, "child1 should have lost label"
-
-    def test_reordering_moves_label(self):
-        """When tasks are reordered, the label should move to the new first child."""
-        parent = self._make_task("100", "Parent", None, 0,
-                                 labels=["next_action"])  # from previous sync
-        # child2 is now first (order=0), child1 second (order=1) — swapped
-        child1 = self._make_task("201", "Child 1 (was first)", "100", 1,
-                                 labels=["next_action"])  # still has old label
-        child2 = self._make_task("202", "Child 2 (now first)", "100", 0)
-
-        ids, labels_map = {}, {}
-        next_action_label = "next_action"
-
-        # add_label on parent — already has it, no-op
-        add_label(parent, next_action_label, ids, labels_map)
-
-        # Sequential propagation — children sorted by order
-        child_tasks = sorted([child1, child2], key=lambda x: x.order)
-        for child_task in child_tasks:
-            remove_label(child_task, next_action_label, ids, labels_map)
-            if not child_task.is_completed and next_action_label in parent.labels:
-                add_label(child_task, next_action_label, ids, labels_map)
-                remove_label(parent, next_action_label, ids, labels_map)
-
-        assert next_action_label in child2.labels, "new first child should have label"
-        assert next_action_label not in child1.labels, "old first child should lose label"
-        assert next_action_label not in parent.labels, "parent should lose label"
-
-    def test_parallel_propagation(self):
-        """In parallel mode, all children get the label and parent loses it."""
-        parent = self._make_task("100", "Parent", None, 0,
-                                 labels=["next_action"])
-        child1 = self._make_task("201", "Child 1", "100", 0)
-        child2 = self._make_task("202", "Child 2", "100", 1)
-
-        ids, labels_map = {}, {}
-        next_action_label = "next_action"
-
-        # Parallel logic (simulates lines 1419-1434)
-        if next_action_label in parent.labels:
-            remove_label(parent, next_action_label, ids, labels_map)
-            for child_task in [child1, child2]:
-                if child_task.content.startswith('*'):
-                    continue
-                if not child_task.is_completed:
-                    add_label(child_task, next_action_label, ids, labels_map)
-
-        assert next_action_label in child1.labels
-        assert next_action_label in child2.labels
-        assert next_action_label not in parent.labels
 
 
 class TestOverviewNetEffect:
