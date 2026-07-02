@@ -153,23 +153,23 @@ Simply add `** ` or `-* ` in front of a project, section, or parentless task to 
 
 # Executing Autodoist
 
-You can run Autodoist from any system that supports Python.
+You can run Autodoist from any system that supports Python and uv.
 
 ## Running Autodoist
 
-Autodoist will read your environment to retrieve your Todoist API key and additional arguments. In order to run on Windows/Linux/Mac OSX you can use the following command lines.
+Autodoist will read your environment to retrieve your Todoist API key and additional arguments. After installing dependencies with `uv sync --frozen`, you can run it on Windows/Linux/Mac OSX with the following command lines.
     
 If you want to enable labelling mode, run with the `-l` argument:
 
-    python autodoist.py -a <API Key> -l <LABEL_NAME>
+    uv run python autodoist.py -a <API Key> -l <LABEL_NAME>
     
 If you want to enable regeneration of sub-tasks in recurring lists, run with the `-r` argument followed by a mode number for the overall functionality (1: no regeneration, 2: regenerate all, 3: regenerate only if all sub-tasks are completed):
 
-    python autodoist.py -a <API Key> -r <NUMBER>
+    uv run python autodoist.py -a <API Key> -r <NUMBER>
     
 If you want to enable an alternative end-of-day, run with the `-e` argument and a number from 1 to 24 to specify which hour:
 
-    python autodoist.py -a <API Key> -e <NUMBER>
+    uv run python autodoist.py -a <API Key> -e <NUMBER>
     
 These modes can be run individually, or combined with each other.
 
@@ -177,36 +177,36 @@ These modes can be run individually, or combined with each other.
 
 Several additional arguments can be provided, for example to change the suffix tags for parallel and sequential projects:
 
-    python autodoist.py --p_suffix <tag>
-    python autodoist.py --s_suffix <tag>
+    uv run python autodoist.py --p_suffix <tag>
+    uv run python autodoist.py --s_suffix <tag>
     
 Note: Be aware that Todoist sections don't like to have a slash '/' in the name, which will automatically change to an underscore. Detection of the tag will not work. 
     
 If you want to hide all tasks due in the future:
 
-    python autodoist.py --hf <NUMBER_OF_DAYS>
+    uv run python autodoist.py --hf <NUMBER_OF_DAYS>
 
 If you want to apply labels to all projects, regardless of whether they have a suffix or not:
 
-    python autodoist.py --all_projects
+    uv run python autodoist.py --all_projects
 
 If you want to exclude projects with suffix "_ignore" when using --all_projects:
 
-    python autodoist.py --all_projects --ignore_suffix
+    uv run python autodoist.py --all_projects --ignore_suffix
 
 In addition, if you experience issues with syncing you can increase the api syncing time (default 5 seconds):
     
-    python autodoist.py --delay <time in seconds>
+    uv run python autodoist.py --delay <time in seconds>
 
 For monitoring purposes, you can specify a URL that will be called after each sync loop iteration to verify autodoist is running:
 
-    python autodoist.py --status_url <monitoring_url>
+    uv run python autodoist.py --status_url <monitoring_url>
 
 This will make a GET request to the specified URL every loop iteration (default every 5 seconds), regardless of whether there were changes to sync. This helps detect when the autodoist process has stopped or crashed.
 
 For all arguments, please check out the help:
 
-    python autodoist.py --help
+    uv run python autodoist.py --help
 
 
 ## Docker container
