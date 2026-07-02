@@ -191,61 +191,6 @@ def http_error(status_code):
     return error
 
 
-def apply_parentless_task_logic(task, next_action_label, dominant_type, first_found,
-                                overview_task_ids, overview_task_labels):
-    """Replicate the parentless task labeling logic from autodoist.py lines 1197-1258.
-
-    This is a direct copy of the branching logic so we can test it in isolation.
-    """
-    # If indicated on project level
-    if dominant_type[0] == 's':
-        if not first_found[0]:
-
-            if dominant_type[1] == 's':
-                if not first_found[1]:
-                    add_label(task, next_action_label, overview_task_ids, overview_task_labels)
-
-                elif next_action_label in task.labels:
-                    remove_label(task, next_action_label, overview_task_ids, overview_task_labels)
-
-            elif dominant_type[1] == 'p':
-                add_label(task, next_action_label, overview_task_ids, overview_task_labels)
-
-    elif dominant_type[0] == 'p':
-
-        if dominant_type[1] == 's':
-            if not first_found[1]:
-                add_label(task, next_action_label, overview_task_ids, overview_task_labels)
-
-            elif next_action_label in task.labels:
-                remove_label(task, next_action_label, overview_task_ids, overview_task_labels)
-
-        elif dominant_type[1] == 'p':
-            add_label(task, next_action_label, overview_task_ids, overview_task_labels)
-
-    # If indicated on section level
-    if dominant_type[0] == 'x' and dominant_type[1] == 's':
-        if not first_found[1]:
-            add_label(task, next_action_label, overview_task_ids, overview_task_labels)
-
-        elif next_action_label in task.labels:
-            remove_label(task, next_action_label, overview_task_ids, overview_task_labels)
-
-    elif dominant_type[0] == 'x' and dominant_type[1] == 'p':
-        add_label(task, next_action_label, overview_task_ids, overview_task_labels)
-
-    # If indicated on parentless task level
-    if dominant_type[1] == 'x' and dominant_type[2] == 's':
-        if not first_found[1]:
-            add_label(task, next_action_label, overview_task_ids, overview_task_labels)
-
-        elif next_action_label in task.labels:
-            remove_label(task, next_action_label, overview_task_ids, overview_task_labels)
-
-    elif dominant_type[1] == 'x' and dominant_type[2] == 'p':
-        add_label(task, next_action_label, overview_task_ids, overview_task_labels)
-
-
 # ---------------------------------------------------------------------------
 # Group 0: TestStartupVerification - Required label startup checks
 # ---------------------------------------------------------------------------
@@ -1172,211 +1117,178 @@ class TestCheckName:
 # ---------------------------------------------------------------------------
 
 class TestHierarchyTypeResolution:
-    """Tests for the parentless task labeling logic (lines 1197-1258).
-
-    Uses apply_parentless_task_logic() which replicates the exact branching
-    from autodoist_magic.
-    """
+    """Planner-interface tests for parentless task strategy inheritance."""
 
     LABEL = "next_action"
 
-    def _run(self, dominant_type, first_found, has_label=False):
-        labels = [self.LABEL] if has_label else []
-        task = make_task("t1", labels=labels)
-        ids, labels_map = {}, {}
-        apply_parentless_task_logic(
-            task, self.LABEL, dominant_type, first_found, ids, labels_map)
-        return self.LABEL in task.labels
+    def _task(self, id, section_id='s1', content='Task', labels=(), order=1):
+        return TaskSnapshot(
+            id=id,
+            content=content,
+            project_id='p1',
+            section_id=section_id,
+            parent_id=None,
+            labels=tuple(labels),
+            order=order,
+        )
 
-    # --- Project-level sequential sections (dominant_type[0]='s') ---
+    def _workspace(self, project_name='Work', sections=None, tasks=()):
+        return WorkspaceSnapshot(
+            projects=(
+                ProjectSnapshot(
+                    id='p1',
+                    name=project_name,
+                    order=1,
+                    is_inbox_project=False,
+                ),
+            ),
+            sections=sections or (
+                SectionSnapshot(id='s1', name=None, project_id='p1', order=1),
+            ),
+            tasks=tasks,
+        )
 
-    def test_sss_first_section_first_task(self):
-        assert self._run('sss', [False, False, False]) is True
+    def _plan(self, workspace):
+        return plan_parentless_next_action_labels(
+            workspace,
+            PlannerConfig(next_action_label=self.LABEL),
+            AutodoistMetadataSnapshot(),
+        )
 
-    def test_sss_first_section_second_task(self):
-        # second task (first_found[1]=True), had label from manual move
-        labels = [self.LABEL]
-        task = make_task("t1", labels=labels)
-        ids, labels_map = {}, {}
-        apply_parentless_task_logic(
-            task, self.LABEL, 'sss', [False, True, False], ids, labels_map)
-        assert self.LABEL not in task.labels
+    def test_project_sequential_section_strategy_labels_only_first_task_in_first_section(self):
+        sections = (
+            SectionSnapshot(id='s1', name=None, project_id='p1', order=1),
+            SectionSnapshot(id='s2', name=None, project_id='p1', order=2),
+        )
+        workspace = self._workspace(
+            project_name='Work -',
+            sections=sections,
+            tasks=(
+                self._task('first', section_id='s1', order=1),
+                self._task('stale-second', section_id='s1', labels=(self.LABEL,), order=2),
+                self._task('second-section', section_id='s2', order=1),
+            ),
+        )
 
-    def test_sss_second_section(self):
-        # second section (first_found[0]=True) - no label
-        assert self._run('sss', [True, False, False]) is False
+        result = self._plan(workspace)
 
-    def test_sps_first_section_first_task(self):
-        assert self._run('sps', [False, False, False]) is True
+        assert result.label_changes == (
+            LabelChange(task_id='first', labels=(self.LABEL,)),
+            LabelChange(task_id='stale-second', labels=()),
+        )
 
-    def test_sps_first_section_second_task(self):
-        # parallel tasks - second task also gets label
-        assert self._run('sps', [False, True, False]) is True
+    def test_project_sequential_parallel_task_strategy_labels_all_tasks_in_first_section(self):
+        workspace = self._workspace(
+            project_name='Work -=',
+            tasks=(
+                self._task('first', order=1),
+                self._task('second', order=2),
+            ),
+        )
 
-    def test_sps_second_section(self):
-        assert self._run('sps', [True, False, False]) is False
+        result = self._plan(workspace)
 
-    # --- Project-level parallel sections (dominant_type[0]='p') ---
+        assert result.label_changes == (
+            LabelChange(task_id='first', labels=(self.LABEL,)),
+            LabelChange(task_id='second', labels=(self.LABEL,)),
+        )
 
-    def test_pss_first_task(self):
-        assert self._run('pss', [False, False, False]) is True
+    def test_project_parallel_sequential_task_strategy_removes_stale_second_task_label(self):
+        workspace = self._workspace(
+            project_name='Work =-',
+            tasks=(
+                self._task('first', order=1),
+                self._task('stale-second', labels=(self.LABEL,), order=2),
+            ),
+        )
 
-    def test_pss_second_task(self):
-        labels = [self.LABEL]
-        task = make_task("t1", labels=labels)
-        ids, labels_map = {}, {}
-        apply_parentless_task_logic(
-            task, self.LABEL, 'pss', [False, True, False], ids, labels_map)
-        assert self.LABEL not in task.labels
+        result = self._plan(workspace)
 
-    def test_pps_any_task(self):
-        assert self._run('pps', [False, False, False]) is True
+        assert result.label_changes == (
+            LabelChange(task_id='first', labels=(self.LABEL,)),
+            LabelChange(task_id='stale-second', labels=()),
+        )
 
-    def test_pps_second_task(self):
-        assert self._run('pps', [False, True, False]) is True
+    def test_project_parallel_parallel_task_strategy_labels_every_task(self):
+        workspace = self._workspace(
+            project_name='Work ==',
+            tasks=(
+                self._task('first', order=1),
+                self._task('second', order=2),
+            ),
+        )
 
-    # --- Section-level (dominant_type[0]='x') ---
+        result = self._plan(workspace)
 
-    def test_xss_first_task(self):
-        assert self._run('xss', [False, False, False]) is True
+        assert result.label_changes == (
+            LabelChange(task_id='first', labels=(self.LABEL,)),
+            LabelChange(task_id='second', labels=(self.LABEL,)),
+        )
 
-    def test_xss_second_task(self):
-        labels = [self.LABEL]
-        task = make_task("t1", labels=labels)
-        ids, labels_map = {}, {}
-        apply_parentless_task_logic(
-            task, self.LABEL, 'xss', [False, True, False], ids, labels_map)
-        assert self.LABEL not in task.labels
+    def test_section_sequential_strategy_removes_stale_second_task_label(self):
+        workspace = self._workspace(
+            sections=(
+                SectionSnapshot(id='s1', name='Next -', project_id='p1', order=1),
+            ),
+            tasks=(
+                self._task('first', order=1),
+                self._task('stale-second', labels=(self.LABEL,), order=2),
+            ),
+        )
 
-    def test_xpp_any_task(self):
-        assert self._run('xpp', [False, True, False]) is True
+        result = self._plan(workspace)
 
-    def test_xps_first_task(self):
-        assert self._run('xps', [False, False, False]) is True
+        assert result.label_changes == (
+            LabelChange(task_id='first', labels=(self.LABEL,)),
+            LabelChange(task_id='stale-second', labels=()),
+        )
 
-    # --- Task-level (dominant_type[1]='x') - BUG ZONE ---
+    def test_section_parallel_strategy_labels_every_task(self):
+        workspace = self._workspace(
+            sections=(
+                SectionSnapshot(id='s1', name='Next =', project_id='p1', order=1),
+            ),
+            tasks=(
+                self._task('first', order=1),
+                self._task('second', order=2),
+            ),
+        )
 
-    def test_xxs_first_task_gets_label(self):
-        """First parentless task with task-level sequential should get label."""
-        assert self._run('xxs', [False, False, False]) is True
+        result = self._plan(workspace)
 
-    def test_xxs_second_task_no_label(self):
-        assert self._run('xxs', [False, True, False]) is False
+        assert result.label_changes == (
+            LabelChange(task_id='first', labels=(self.LABEL,)),
+            LabelChange(task_id='second', labels=(self.LABEL,)),
+        )
 
-    def test_xxp_any_task(self):
-        assert self._run('xxp', [False, True, False]) is True
+    def test_parentless_task_sequential_suffix_labels_first_task_and_removes_stale_second_task(self):
+        workspace = self._workspace(
+            tasks=(
+                self._task('first', content='Task -', order=1),
+                self._task('stale-second', content='Task -', labels=(self.LABEL,), order=2),
+            ),
+        )
 
-    def test_xxp_first_task(self):
-        assert self._run('xxp', [False, False, False]) is True
+        result = self._plan(workspace)
 
+        assert result.label_changes == (
+            LabelChange(task_id='first', labels=(self.LABEL,)),
+            LabelChange(task_id='stale-second', labels=()),
+        )
 
-# ---------------------------------------------------------------------------
-# Group 3: TestChildTaskPropagation - Sequential/parallel child labeling
-# ---------------------------------------------------------------------------
+    def test_parentless_task_parallel_suffix_labels_that_task(self):
+        workspace = self._workspace(
+            tasks=(
+                self._task('explicit-parallel', content='Task =', order=1),
+                self._task('unsuffixed', order=2),
+            ),
+        )
 
-class TestChildTaskPropagation:
-    """Tests for child task label propagation (lines 1279-1319)."""
+        result = self._plan(workspace)
 
-    LABEL = "next_action"
-
-    def _run_sequential(self, parent, children):
-        ids, labels_map = {}, {}
-        for child in children:
-            if child.content.startswith('*'):
-                continue
-            remove_label(child, self.LABEL, ids, labels_map)
-            if not child.is_completed and self.LABEL in parent.labels:
-                add_label(child, self.LABEL, ids, labels_map)
-                remove_label(parent, self.LABEL, ids, labels_map)
-        return ids, labels_map
-
-    def _run_parallel(self, parent, children):
-        ids, labels_map = {}, {}
-        if self.LABEL in parent.labels:
-            remove_label(parent, self.LABEL, ids, labels_map)
-            for child in children:
-                if child.content.startswith('*'):
-                    continue
-                if not child.is_completed:
-                    add_label(child, self.LABEL, ids, labels_map)
-        return ids, labels_map
-
-    def test_sequential_first_child_gets_label(self):
-        parent = make_task("p", labels=[self.LABEL])
-        c1 = make_task("c1", parent_id="p", order=0)
-        c2 = make_task("c2", parent_id="p", order=1)
-        c3 = make_task("c3", parent_id="p", order=2)
-        self._run_sequential(parent, [c1, c2, c3])
-
-        assert self.LABEL in c1.labels
-        assert self.LABEL not in c2.labels
-        assert self.LABEL not in c3.labels
-        assert self.LABEL not in parent.labels
-
-    def test_sequential_skips_completed_first_child(self):
-        parent = make_task("p", labels=[self.LABEL])
-        c1 = make_task("c1", parent_id="p", order=0, is_completed=True)
-        c2 = make_task("c2", parent_id="p", order=1)
-        self._run_sequential(parent, [c1, c2])
-
-        assert self.LABEL not in c1.labels
-        assert self.LABEL in c2.labels
-        assert self.LABEL not in parent.labels
-
-    def test_sequential_skips_headered_first_child(self):
-        parent = make_task("p", labels=[self.LABEL])
-        c1 = make_task("c1", content="* Header", parent_id="p", order=0)
-        c2 = make_task("c2", parent_id="p", order=1)
-        self._run_sequential(parent, [c1, c2])
-
-        assert self.LABEL not in c1.labels
-        assert self.LABEL in c2.labels
-        assert self.LABEL not in parent.labels
-
-    def test_sequential_parent_without_label_no_propagation(self):
-        parent = make_task("p", labels=[])
-        c1 = make_task("c1", parent_id="p", order=0)
-        c2 = make_task("c2", parent_id="p", order=1)
-        self._run_sequential(parent, [c1, c2])
-
-        assert self.LABEL not in c1.labels
-        assert self.LABEL not in c2.labels
-
-    def test_parallel_all_children_get_label(self):
-        parent = make_task("p", labels=[self.LABEL])
-        c1 = make_task("c1", parent_id="p", order=0)
-        c2 = make_task("c2", parent_id="p", order=1)
-        c3 = make_task("c3", parent_id="p", order=2)
-        self._run_parallel(parent, [c1, c2, c3])
-
-        assert self.LABEL in c1.labels
-        assert self.LABEL in c2.labels
-        assert self.LABEL in c3.labels
-        assert self.LABEL not in parent.labels
-
-    def test_parallel_skips_completed(self):
-        parent = make_task("p", labels=[self.LABEL])
-        c1 = make_task("c1", parent_id="p", order=0)
-        c2 = make_task("c2", parent_id="p", order=1, is_completed=True)
-        self._run_parallel(parent, [c1, c2])
-
-        assert self.LABEL in c1.labels
-        assert self.LABEL not in c2.labels
-        assert self.LABEL not in parent.labels
-
-    def test_parallel_skips_headered(self):
-        parent = make_task("p", labels=[self.LABEL])
-        c1 = make_task("c1", parent_id="p", order=0)
-        c2 = make_task("c2", content="* Done", parent_id="p", order=1)
-        self._run_parallel(parent, [c1, c2])
-
-        assert self.LABEL in c1.labels
-        assert self.LABEL not in c2.labels
-
-    def test_no_children_parent_keeps_label(self):
-        parent = make_task("p", labels=[self.LABEL])
-        self._run_sequential(parent, [])
-        assert self.LABEL in parent.labels
+        assert result.label_changes == (
+            LabelChange(task_id='explicit-parallel', labels=(self.LABEL,)),
+        )
 
 
 # ---------------------------------------------------------------------------
