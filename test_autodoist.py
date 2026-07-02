@@ -914,7 +914,17 @@ class TestActionableDatePlanner:
             tasks=tasks,
         )
 
-    def _task(self, id, content='Task', parent_id=None, labels=(), order=1, due_date=None):
+    def _task(
+        self,
+        id,
+        content='Task',
+        parent_id=None,
+        labels=(),
+        order=1,
+        due_date=None,
+        is_completed=False,
+        is_header=False,
+    ):
         return TaskSnapshot(
             id=id,
             content=content,
@@ -924,6 +934,8 @@ class TestActionableDatePlanner:
             labels=tuple(labels),
             order=order,
             due_date=due_date,
+            is_completed=is_completed,
+            is_header=is_header,
         )
 
     def _plan(self, workspace, **config_overrides):
@@ -984,6 +996,49 @@ class TestActionableDatePlanner:
         result = self._plan(workspace)
 
         assert result.label_changes == ()
+
+    def test_completed_task_loses_stale_next_action_label(self):
+        workspace = self._workspace((
+            self._task('task', labels=(self.LABEL,), order=1, is_completed=True),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='task', labels=()),
+        )
+
+    def test_completed_parent_does_not_propagate_stale_label_to_child(self):
+        workspace = self._workspace((
+            self._task('parent', labels=(self.LABEL,), order=1, is_completed=True),
+            self._task('child', parent_id='parent', order=1),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='parent', labels=()),
+        )
+
+    def test_header_child_loses_stale_next_action_label(self):
+        workspace = self._workspace((
+            self._task('parent', order=1),
+            self._task(
+                'child',
+                content='* Header',
+                parent_id='parent',
+                labels=(self.LABEL,),
+                order=1,
+                is_header=True,
+            ),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='parent', labels=(self.LABEL,)),
+            LabelChange(task_id='child', labels=()),
+        )
 
 
 # ---------------------------------------------------------------------------

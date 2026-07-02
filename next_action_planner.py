@@ -349,6 +349,8 @@ def plan_next_action_labels(workspace, config, metadata):
         key=lambda task: task.order,
     )
     for task in root_tasks:
+        if task.is_completed or task.is_header:
+            continue
         section = sections_by_id.get(task.section_id)
         dominant_strategy = _dominant_strategy(
             task_strategies.get(task.id),
@@ -367,6 +369,11 @@ def plan_next_action_labels(workspace, config, metadata):
             section_labeling_disabled=section.is_labeling_disabled if section else False,
         )
 
+    _remove_labels_from_ineligible_tasks(
+        workspace.tasks,
+        desired_labels,
+        config.next_action_label,
+    )
     _apply_actionable_date_filters(
         workspace.tasks,
         children_by_parent,
@@ -593,6 +600,12 @@ def _remove_label_from_task_tree(task, children_by_parent, desired_labels, label
     desired_labels[task.id] = _without_label(desired_labels[task.id], label)
     for child in children_by_parent.get(task.id, ()):
         _remove_label_from_task_tree(child, children_by_parent, desired_labels, label)
+
+
+def _remove_labels_from_ineligible_tasks(tasks, desired_labels, label):
+    for task in tasks:
+        if task.is_completed or task.is_header:
+            desired_labels[task.id] = _without_label(desired_labels[task.id], label)
 
 
 def _plan_parentless_task_labels(
