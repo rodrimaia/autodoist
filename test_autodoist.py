@@ -940,6 +940,61 @@ class TestActionableDatePlanner:
             LabelChange(task_id='child', labels=()),
         )
 
+    def test_due_relative_zero_day_start_allows_task_label_on_due_date(self):
+        workspace = self._workspace((
+            self._task(
+                'task',
+                content='Task start=due-0d',
+                order=1,
+                due_date=self.TODAY,
+            ),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='task', labels=(self.LABEL,)),
+        )
+
+    def test_due_relative_zero_day_start_removes_descendant_labels_day_before_due(self):
+        workspace = self._workspace((
+            self._task(
+                'parent',
+                content='Parent start=due-0d',
+                order=1,
+                due_date=self.TODAY + timedelta(days=1),
+            ),
+            self._task('child', parent_id='parent', order=1),
+            self._task(
+                'grandchild',
+                parent_id='child',
+                labels=(self.LABEL,),
+                order=1,
+            ),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='grandchild', labels=()),
+        )
+
+    def test_hide_future_threshold_is_inclusive_for_stale_task_label(self):
+        workspace = self._workspace((
+            self._task(
+                'threshold',
+                labels=(self.LABEL,),
+                order=1,
+                due_date=self.TODAY + timedelta(days=14),
+            ),
+        ))
+
+        result = self._plan(workspace, hide_future=14)
+
+        assert result.label_changes == (
+            LabelChange(task_id='threshold', labels=()),
+        )
+
     @pytest.mark.parametrize(
         ('marker', 'due_date'),
         (

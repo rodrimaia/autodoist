@@ -1,3 +1,27 @@
+2026-07-02 - Issue #14: Lock boundary behavior for actionable dates and hide-future
+
+Changed:
+- Added actionable-date planner regression coverage for `start=due-0d` exactly on the task due date, verifying the task can receive `next_action`.
+- Added day-before `start=due-0d` coverage with a parent -> child -> grandchild tree, verifying stale descendant `next_action` labels are removed before the due-date boundary.
+- Added `hide_future` threshold coverage documenting the current inclusive behavior: a task due exactly `hide_future` days out loses a stale `next_action` label.
+
+Verification:
+- `uv run pytest test_autodoist.py -k 'ActionableDatePlanner' -q` -> 16 passed, 107 deselected.
+- `uv run pytest -q` -> 130 passed.
+- No separate lint or type-check command is configured in `pyproject.toml`; pytest is the available project check.
+
+Decisions:
+- Treated issue #14 as a regression coverage task because the planner already implements the documented boundary behavior.
+- Used the planner snapshot seam in `TestActionableDatePlanner` to avoid changing Todoist SDK integration behavior.
+- Recorded the current `hide_future` boundary as inclusive because `_is_hidden_future_task` filters tasks whose due-date delta is greater than or equal to the configured threshold.
+- Local review found no standards or spec issues; the review sub-agent workflow was skipped because the available delegation tool requires explicit user permission.
+
+Blockers:
+- None.
+
+Next recommended task:
+- Check GitHub for the next `ready-for-agent` issue after #14 is closed.
+
 2026-07-02 - Issue #13: Cover nested actionable date marker cleanup
 
 Changed:
