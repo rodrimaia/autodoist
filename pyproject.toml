@@ -9,6 +9,7 @@ authors = [
     { name = "Alexander Haselhoff", email = "xela@live.nl" },
 ]
 dependencies = [
+    "python-json-logger>=3.3.0,<4",
     "requests>=2.32.3,<3",
     "todoist-api-python==3.2.1",
 ]

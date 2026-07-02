@@ -35,6 +35,7 @@ Autodoist has been build with Python 3.11.1, which is the recommended version. O
 To run Autodoist the following packages are required:
 * ```todoist-api-python```
 * ```requests```
+* ```python-json-logger```
 
 For your convenience a `pyproject.toml` and `uv.lock` are provided, which allow you to install the locked dependencies with uv:
 
@@ -203,6 +204,10 @@ For monitoring purposes, you can specify a URL that will be called after each sy
     uv run python autodoist.py --status_url <monitoring_url>
 
 This will make a GET request to the specified URL every loop iteration (default every 5 seconds), regardless of whether there were changes to sync. This helps detect when the autodoist process has stopped or crashed.
+
+## Operational logs
+
+Autodoist writes operational logs as one JSON object per line to both stderr and `debug.log`. Every log includes `timestamp`, `level`, and `message`; some events also include structured fields such as `component`, `operation`, `label`, `error_type`, `retry_in_seconds`, and `retry_window_remaining_seconds`.
 
 For all arguments, please check out the help:
 

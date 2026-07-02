@@ -14,12 +14,35 @@ import sqlite3
 import os
 import re
 import json
+from pythonjsonlogger.json import JsonFormatter
 
 STARTUP_RETRY_WINDOW_SECONDS = 600
 STARTUP_RETRY_INITIAL_DELAY_SECONDS = 5
 STARTUP_RETRY_MAX_DELAY_SECONDS = 60
+LOG_FORMAT = "%(asctime)s %(levelname)s %(message)s"
 
 # Connect to SQLite database
+
+
+def configure_logging(log_level, log_path='debug.log', stream=None):
+    formatter = JsonFormatter(
+        LOG_FORMAT,
+        datefmt='%Y-%m-%dT%H:%M:%SZ',
+        rename_fields={
+            'asctime': 'timestamp',
+            'levelname': 'level',
+        },
+    )
+    formatter.converter = time.gmtime
+    handlers = [
+        logging.FileHandler(log_path, 'w+', 'utf-8'),
+        logging.StreamHandler(stream),
+    ]
+
+    for handler in handlers:
+        handler.setFormatter(formatter)
+
+    logging.basicConfig(level=log_level, handlers=handlers, force=True)
 
 
 def create_connection(path):
@@ -289,6 +312,20 @@ def is_temporary_todoist_error(error):
     return False
 
 
+def describe_temporary_todoist_error(error):
+    if isinstance(error, requests.exceptions.Timeout):
+        return "timeout"
+    if isinstance(error, requests.exceptions.ConnectionError):
+        return "connection_error"
+    if isinstance(error, requests.exceptions.HTTPError):
+        status_code = getattr(getattr(error, 'response', None), 'status_code', None)
+        if status_code == 429:
+            return "rate_limited"
+        if status_code is not None and 500 <= status_code < 600:
+            return "server_error"
+    return type(error).__name__
+
+
 def get_labels_with_startup_retry(
         api,
         label_name,
@@ -313,7 +350,14 @@ def get_labels_with_startup_retry(
                 logging.error(
                     "Todoist temporary failure persisted while verifying required label '%s' for %dm; exiting.",
                     label_name,
-                    retry_window_seconds // 60)
+                    retry_window_seconds // 60,
+                    extra={
+                        "component": "startup_verification",
+                        "operation": "verify_required_label",
+                        "label": label_name,
+                        "error_type": describe_temporary_todoist_error(error),
+                        "retry_window_remaining_seconds": 0,
+                    })
                 sys.exit(1)
 
             retry_in_seconds = min(
@@ -323,7 +367,15 @@ def get_labels_with_startup_retry(
                 label_name,
                 error,
                 retry_in_seconds,
-                int(remaining_seconds))
+                int(remaining_seconds),
+                extra={
+                    "component": "startup_verification",
+                    "operation": "verify_required_label",
+                    "label": label_name,
+                    "error_type": describe_temporary_todoist_error(error),
+                    "retry_in_seconds": retry_in_seconds,
+                    "retry_window_remaining_seconds": int(remaining_seconds),
+                })
             sleep(retry_in_seconds)
             delay_seconds = min(delay_seconds * 2, max_delay_seconds)
 
@@ -1516,14 +1568,7 @@ def main():
     else:
         log_level = logging.INFO
 
-    # Set logging config settings
-    logging.basicConfig(level=log_level,
-                        format='%(asctime)s %(levelname)-8s %(message)s',
-                        datefmt='%Y-%m-%d %H:%M:%S',
-                        handlers=[logging.FileHandler(
-                            'debug.log', 'w+', 'utf-8'),
-                            logging.StreamHandler()]
-                        )
+    configure_logging(log_level)
 
     # Initialise api
     api = initialise_api(args)

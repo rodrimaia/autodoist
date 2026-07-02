@@ -9,6 +9,9 @@ Run with: python -m pytest test_autodoist.py -v
 import sys
 import types
 import argparse
+import io
+import json
+import logging
 import sqlite3
 import requests
 from datetime import date, datetime, timedelta
@@ -96,7 +99,7 @@ from autodoist import (
     get_type, get_project_type, get_section_type, get_task_type,
     db_check_existance, db_read_value, db_update_value,
     execute_query, execute_read_query, get_labels_with_startup_retry,
-    initialise_api, verify_label_existance,
+    initialise_api, verify_label_existance, configure_logging,
 )
 
 
@@ -225,6 +228,78 @@ def apply_parentless_task_logic(task, next_action_label, dominant_type, first_fo
 # ---------------------------------------------------------------------------
 # Group 0: TestStartupVerification - Required label startup checks
 # ---------------------------------------------------------------------------
+
+class TestLoggingConfiguration:
+    def teardown_method(self):
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers[:]:
+            handler.close()
+            root_logger.removeHandler(handler)
+        root_logger.setLevel(logging.WARNING)
+
+    def test_configures_console_and_file_handlers_for_json_logs(self, tmp_path):
+        log_file = tmp_path / "debug.log"
+        console = io.StringIO()
+
+        configure_logging(logging.INFO, log_path=log_file, stream=console)
+        logging.info(
+            "Todoist temporary failure while verifying required label",
+            extra={
+                "component": "startup_verification",
+                "operation": "verify_required_label",
+                "label": "next_action",
+            },
+        )
+
+        console_log = json.loads(console.getvalue())
+        file_log = json.loads(log_file.read_text())
+
+        assert console_log["level"] == "INFO"
+        assert console_log["message"] == "Todoist temporary failure while verifying required label"
+        assert console_log["component"] == "startup_verification"
+        assert console_log["operation"] == "verify_required_label"
+        assert console_log["label"] == "next_action"
+        assert "timestamp" in console_log
+        assert file_log == console_log
+
+    def test_preserves_configured_log_level(self, tmp_path):
+        console = io.StringIO()
+
+        configure_logging(logging.WARNING, log_path=tmp_path / "debug.log", stream=console)
+        logging.info("hidden")
+        logging.warning("visible")
+
+        log = json.loads(console.getvalue())
+
+        assert log["level"] == "WARNING"
+        assert log["message"] == "visible"
+
+    def test_startup_retry_logs_structured_operational_fields(self, tmp_path):
+        api = MagicMock()
+        labels = [FakeLabel(id="1", name="next_action")]
+        api.get_labels.side_effect = [
+            http_error(429),
+            [labels],
+        ]
+        console = io.StringIO()
+
+        configure_logging(logging.WARNING, log_path=tmp_path / "debug.log", stream=console)
+        get_labels_with_startup_retry(
+            api,
+            "next_action",
+            sleep=MagicMock(),
+            monotonic=MagicMock(side_effect=[0, 0]),
+        )
+
+        log = json.loads(console.getvalue())
+
+        assert log["level"] == "WARNING"
+        assert log["component"] == "startup_verification"
+        assert log["operation"] == "verify_required_label"
+        assert log["label"] == "next_action"
+        assert log["error_type"] == "rate_limited"
+        assert log["retry_in_seconds"] == 5
+        assert log["retry_window_remaining_seconds"] == 600
 
 class TestStartupVerification:
     LABEL = "next_action"
