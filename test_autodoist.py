@@ -79,6 +79,7 @@ class FakeLabel:
 class FakeDue:
     date: object
     is_recurring: bool = False
+    string: str = "every day"
 
 
 # Patch todoist imports before importing autodoist
@@ -935,6 +936,31 @@ class TestIntegration:
         assert ids == {"t1": 0, "c1": -1}
         assert labels == {"t1": [], "c1": []}
         assert "Wrong start-date format" not in caplog.text
+
+    def test_shifted_end_of_day_accepts_sdk_date_object_for_recurring_task(self):
+        """Shifted end-of-day should compare recurring due dates from SDK date objects."""
+        project = FakeProject(id="p1", name="Work")
+        task = make_task("t1", project_id="p1", order=0)
+        task.due = FakeDue(date=date.today() + timedelta(days=1), is_recurring=True)
+
+        api = self._make_api([project], [], [task])
+        args = self._make_args(label=None, end=24)
+        conn = create_test_db()
+        try:
+            db_check_existance(conn, task)
+            db_update_value(conn, task, "due_date",
+                            (date.today() - timedelta(days=1)).isoformat())
+
+            from autodoist import autodoist_magic
+            autodoist_magic(args, api, conn)
+        finally:
+            conn.close()
+
+        api.update_task.assert_called_once_with(
+            task_id="t1",
+            due_date=date.today().isoformat(),
+            due_string="every day",
+        )
 
     def test_headered_tasks_skipped(self):
         """Tasks starting with '*' should not get the label."""

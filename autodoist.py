@@ -891,6 +891,11 @@ def run_recurring_lists_logic(args, api, connection, task, task_items, task_item
     if task.parent_id == 0:
         try:
             if task.due.is_recurring:
+                current_due_date = normalise_due_date(task.due)
+                if current_due_date is None:
+                    return
+                current_due_date_str = current_due_date.isoformat()
+
                 try:
                     db_task_due_date = db_read_value(
                         connection, task, 'due_date')[0][0]
@@ -900,10 +905,10 @@ def run_recurring_lists_logic(args, api, connection, task, task_items, task_item
                         logging.debug(
                             'New recurring task detected: %s' % task.content)
                         db_update_value(connection, task,
-                                        'due_date', task.due.date)
+                                        'due_date', current_due_date_str)
 
                     # Check if the T0 task date has changed, because a user has checked the task
-                    if task.due.date != db_task_due_date:
+                    if current_due_date_str != db_task_due_date:
 
                         # TODO: reevaluate regeneration mode. Disabled for now.
                         # # Mark children for action based on mode
@@ -944,17 +949,12 @@ def run_recurring_lists_logic(args, api, connection, task, task_items, task_item
                             # Check if current time is before our end-of-day
                             if (args.end - current_hour) > 0:
 
-                                # Determine the difference in days set by todoist
-                                nd = [int(x) for x in task.due.date.split('-')]
                                 od = [int(x)
                                       for x in db_task_due_date.split('-')]
 
-                                new_date = datetime(
-                                    nd[0], nd[1], nd[2])
-                                old_date = datetime(
-                                    od[0], od[1], od[2])
-                                today = datetime(
-                                    t.year, t.month, t.day)
+                                new_date = current_due_date
+                                old_date = date(od[0], od[1], od[2])
+                                today = date(t.year, t.month, t.day)
                                 days_difference = (
                                     new_date-today).days
                                 days_overdue = (
@@ -974,14 +974,14 @@ def run_recurring_lists_logic(args, api, connection, task, task_items, task_item
 
                         # Save the new date for reference us
                         db_update_value(connection, task,
-                                        'due_date', task.due.date)
+                                        'due_date', current_due_date_str)
 
                 except:
                     # If date has never been saved before, create a new entry
                     logging.debug(
                         'New recurring task detected: %s' % task.content)
                     db_update_value(connection, task,
-                                    'due_date', task.due.date)
+                                    'due_date', current_due_date_str)
 
         except:
             pass
