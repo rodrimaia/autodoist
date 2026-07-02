@@ -40,6 +40,10 @@ _Avoid_: suffix code, mode string, type code
 A phrase on a Todoist task that delays when the task may receive the next-action label, either until an absolute date or until a date relative to the task's due date.
 _Avoid_: start-date hack, date suffix
 
+**Inactive relative actionable date marker**:
+A relative actionable date marker that cannot be evaluated because the task has no Todoist due date. It does not delay next-action labeling, but should be surfaced to the user as incomplete.
+_Avoid_: missing-due error, invalid start date, blocking marker
+
 **Autodoist metadata**:
 Persisted facts from previous sync loops that Autodoist uses to detect label strategy changes and continue next-action label propagation correctly.
 _Avoid_: SQLite data, task_type columns, internal cache
