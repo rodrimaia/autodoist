@@ -1499,8 +1499,8 @@ class TestIntegration:
         (ids, labels, _), _ = self._run([project], [], [task], hide_future=14)
 
         assert self.LABEL not in task.labels
-        assert ids == {"t1": 0}
-        assert labels == {"t1": []}
+        assert ids == {}
+        assert labels == {}
 
     def test_hide_future_skips_task_with_sdk_datetime_object(self):
         """Future tasks should not get the label when SDK returns a datetime object."""
@@ -1511,8 +1511,8 @@ class TestIntegration:
         (ids, labels, _), _ = self._run([project], [], [task], hide_future=14)
 
         assert self.LABEL not in task.labels
-        assert ids == {"t1": 0}
-        assert labels == {"t1": []}
+        assert ids == {}
+        assert labels == {}
 
     def test_relative_start_due_with_sdk_date_object_removes_child_labels(self, caplog):
         """start=due-* should understand SDK date objects and hide children until start."""
@@ -1529,8 +1529,8 @@ class TestIntegration:
 
         assert self.LABEL not in parent.labels
         assert self.LABEL not in child.labels
-        assert ids == {"t1": 0, "c1": -1}
-        assert labels == {"t1": [], "c1": []}
+        assert ids == {"c1": 1}
+        assert labels == {"c1": []}
         assert "Wrong start-date format" not in caplog.text
 
     def test_shifted_end_of_day_accepts_sdk_date_object_for_recurring_task(self):
@@ -1657,6 +1657,39 @@ class TestIntegration:
         # The task-level '-' should make subtasks sequential
         assert self.LABEL in child1.labels
         assert self.LABEL not in child2.labels
+
+    def test_sync_loop_persists_metadata_without_label_changes(self):
+        """Planner metadata commands are persisted even when labels are already correct."""
+        project = FakeProject(id="p1", name="Work -")
+        task = make_task("t1", project_id="p1", order=0, labels=[self.LABEL])
+        api = self._make_api([project], [], [task])
+        args = self._make_args()
+        conn = create_test_db()
+        try:
+            from autodoist import autodoist_magic
+            ids, labels, _ = autodoist_magic(args, api, conn)
+
+            assert ids == {}
+            assert labels == {}
+            assert db_read_value(conn, project, "project_type")[0][0] == "sss"
+        finally:
+            conn.close()
+
+    def test_sync_loop_exposes_planner_final_label_sets(self):
+        """Todoist label writes use the planner's final label set for changed tasks."""
+        project = FakeProject(id="p1", name="Work")
+        task = make_task(
+            "t1",
+            project_id="p1",
+            order=0,
+            labels=[self.LABEL, "existing"],
+        )
+
+        (ids, labels, _), _ = self._run([project], [], [task])
+
+        assert task.labels == ["existing"]
+        assert ids == {"t1": 1}
+        assert labels == {"t1": ["existing"]}
 
 
 # ---------------------------------------------------------------------------

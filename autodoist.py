@@ -9,14 +9,27 @@ import time
 import requests
 import argparse
 import logging
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 import sqlite3
 import os
 import re
 import json
 from pythonjsonlogger.json import JsonFormatter
 from next_action_planner import (
+    AutodoistMetadataSnapshot,
+    PlannerConfig,
+    ProjectSnapshot,
+    RecordProjectStrategy,
+    RecordSectionStrategy,
+    RecordTaskParentStrategy,
+    RecordTaskStrategy,
+    SectionSnapshot,
+    SelectionStrategy,
+    TaskSnapshot,
+    WorkspaceSnapshot,
     label_strategy_to_legacy_type,
+    legacy_type_to_label_strategy,
+    plan_next_action_labels,
     parse_label_strategy,
 )
 
@@ -577,15 +590,167 @@ def normalise_due_date(due):
     return None
 
 
-def is_hidden_future_task(task, hide_future):
-    if hide_future <= 0:
+def build_planner_config(args):
+    return PlannerConfig(
+        next_action_label=args.label,
+        s_suffix=args.s_suffix,
+        p_suffix=args.p_suffix,
+        inbox=args.inbox,
+        all_projects=args.all_projects,
+        ignore_suffix=args.ignore_suffix,
+        hide_future=args.hide_future,
+        dateformat=args.dateformat,
+    )
+
+
+def build_workspace_snapshot(projects, sections, tasks):
+    return WorkspaceSnapshot(
+        projects=tuple(
+            ProjectSnapshot(
+                id=project.id,
+                name=project.name,
+                order=project.order,
+                is_inbox_project=project.is_inbox_project,
+            )
+            for project in projects
+        ),
+        sections=tuple(
+            SectionSnapshot(
+                id=section.id,
+                name=section.name,
+                project_id=section.project_id,
+                order=section.order,
+                is_collapsed=section.is_collapsed,
+                is_labeling_disabled=_section_labeling_disabled(section),
+            )
+            for section in sections
+        ),
+        tasks=tuple(
+            TaskSnapshot(
+                id=task.id,
+                content=task.content,
+                project_id=task.project_id,
+                section_id=task.section_id,
+                parent_id=_normalise_parent_id(task.parent_id),
+                labels=tuple(task.labels),
+                order=task.order,
+                is_completed=task.is_completed,
+                due_date=normalise_due_date(task.due),
+                is_header=task.content.startswith('*'),
+            )
+            for task in tasks
+        ),
+    )
+
+
+def build_autodoist_metadata_snapshot(connection, projects, sections, tasks):
+    return AutodoistMetadataSnapshot(
+        project_strategies={
+            project.id: legacy_type_to_label_strategy(
+                _read_metadata_value(connection, project, 'project_type')
+            )
+            for project in projects
+        },
+        section_strategies={
+            section.id: legacy_type_to_label_strategy(
+                _read_metadata_value(connection, section, 'section_type')
+            )
+            for section in sections
+        },
+        task_strategies={
+            task.id: legacy_type_to_label_strategy(
+                _read_metadata_value(connection, task, 'task_type')
+            )
+            for task in tasks
+        },
+        task_parent_strategies={
+            task.id: _legacy_parent_strategy(
+                _read_metadata_value(connection, task, 'parent_type')
+            )
+            for task in tasks
+        },
+    )
+
+
+def apply_planner_metadata_commands(connection, tasks_by_id, sections_by_id, projects_by_id, commands):
+    for command in commands:
+        if isinstance(command, RecordProjectStrategy):
+            db_update_value(
+                connection,
+                projects_by_id[command.project_id],
+                'project_type',
+                label_strategy_to_legacy_type(command.strategy),
+            )
+        elif isinstance(command, RecordSectionStrategy):
+            db_update_value(
+                connection,
+                sections_by_id[command.section_id],
+                'section_type',
+                label_strategy_to_legacy_type(command.strategy),
+            )
+        elif isinstance(command, RecordTaskStrategy):
+            db_update_value(
+                connection,
+                tasks_by_id[command.task_id],
+                'task_type',
+                label_strategy_to_legacy_type(command.strategy),
+            )
+        elif isinstance(command, RecordTaskParentStrategy):
+            db_update_value(
+                connection,
+                tasks_by_id[command.task_id],
+                'parent_type',
+                _selection_strategy_to_legacy_type(command.strategy),
+            )
+
+
+def apply_planner_label_changes(tasks_by_id, label_changes, overview_task_ids, overview_task_labels):
+    for label_change in label_changes:
+        task = tasks_by_id[label_change.task_id]
+        final_labels = list(label_change.labels)
+        if task.labels == final_labels:
+            continue
+
+        task.labels = final_labels
+        overview_task_ids[task.id] = 1
+        overview_task_labels[task.id] = final_labels
+
+
+def _read_metadata_value(connection, model, column):
+    try:
+        result = db_read_value(connection, model, column)
+        if result:
+            return result[0][0]
+    except:
+        pass
+    return None
+
+
+def _legacy_parent_strategy(value):
+    if value == SelectionStrategy.SEQUENTIAL.value:
+        return SelectionStrategy.SEQUENTIAL
+    if value == SelectionStrategy.PARALLEL.value:
+        return SelectionStrategy.PARALLEL
+    return None
+
+
+def _selection_strategy_to_legacy_type(strategy):
+    if strategy is None:
+        return None
+    return strategy.value
+
+
+def _section_labeling_disabled(section):
+    try:
+        return section.name.startswith('*') or section.name.endswith('*')
+    except:
         return False
 
-    due_date = normalise_due_date(task.due)
-    if due_date is None:
-        return False
 
-    return (due_date - date.today()).days >= hide_future
+def _normalise_parent_id(parent_id):
+    if parent_id == 0 or parent_id is None:
+        return None
+    return parent_id
 
 # Find the type based on name suffix.
 
@@ -954,23 +1119,6 @@ def run_recurring_lists_logic(args, api, connection, task, task_items, task_item
     #         #               item.content)
     #         pass
 
-# Find and clean all children under a task
-
-
-def find_and_clean_all_children(task_ids, task, section_tasks):
-
-    child_tasks = list(filter(lambda x: x.parent_id == task.id, section_tasks))
-
-    if child_tasks != []:
-        for child_task in child_tasks:
-            # Children found, go deeper
-            task_ids.append(child_task.id)
-            task_ids = find_and_clean_all_children(
-                task_ids, child_task, section_tasks)
-
-    return task_ids
-
-
 def find_and_headerify_all_children(api, task, section_tasks, mode):
     num_updates = 0
     child_tasks = list(filter(lambda x: x.parent_id == task.id, section_tasks))
@@ -1003,7 +1151,6 @@ def autodoist_magic(args, api, connection):
     overview_task_labels = {}
     next_action_label = args.label
     regen_labels_id = args.regen_label_names
-    first_found = [False, False, False]
     num_updates = 0
 
     # Get all todoist info
@@ -1030,29 +1177,12 @@ def autodoist_magic(args, api, connection):
             api, project)
         num_updates += header_updates
 
-        # Get project type
-        if next_action_label is not None:
-            project_type, project_type_changed = get_project_type(
-                args, connection, project)
-        else:
-            project_type = None
-            project_type_changed = 0
-
         # Get all tasks for the project
         try:
             project_tasks = [
                 t for t in all_tasks if t.project_id == project.id]
         except Exception as error:
             logging.warning(error)
-
-        # If a project type has changed, clean all tasks in this project for good measure
-        if next_action_label is not None:
-            if project_type_changed == 1:
-                for task in project_tasks:
-                    remove_label(task, next_action_label,
-                                 overview_task_ids, overview_task_labels)
-                    db_update_value(connection, task, 'task_type', None)
-                    db_update_value(connection, task, 'parent_type', None)
 
         # Run for both non-sectioned and sectioned tasks
         # for s in [0,1]:
@@ -1073,19 +1203,7 @@ def autodoist_magic(args, api, connection):
         except Exception as error:
             logging.debug(error)
 
-        # Reset
-        first_found[0] = False
-
         for section in sections:
-
-            # Check if section labelling is disabled (useful for e.g. Kanban)
-            if next_action_label is not None:
-                disable_section_labelling = 0
-                try:
-                    if section.name.startswith('*') or section.name.endswith('*'):
-                        disable_section_labelling = 1
-                except:
-                    pass
 
             # Skip DB and type operations for the fake None section (tasks without a section)
             if section.id is not None:
@@ -1097,18 +1215,9 @@ def autodoist_magic(args, api, connection):
                     api, section)
                 num_updates += header_updates
 
-                # Get section type
-                if next_action_label:
-                    section_type, section_type_changed = get_section_type(
-                        args, connection, section, project)
-                else:
-                    section_type = None
-                    section_type_changed = 0
             else:
                 header_all_in_s = False
                 unheader_all_in_s = False
-                section_type = None
-                section_type_changed = 0
 
             # Get all tasks for the section
             section_tasks = [x for x in project_tasks if x.section_id
@@ -1126,23 +1235,8 @@ def autodoist_magic(args, api, connection):
             section_tasks = sorted(section_tasks, key=lambda x: (
                 x.parent_id if x.parent_id else "", x.order))
 
-            # If a type has changed, clean all tasks in this section for good measure
-            if next_action_label is not None:
-                if section_type_changed == 1:
-                    for task in section_tasks:
-                        remove_label(task, next_action_label,
-                                     overview_task_ids, overview_task_labels)
-                        db_update_value(connection, task, 'task_type', None)
-                        db_update_value(connection, task, 'parent_type', None)
-
-            # Reset
-            first_found[1] = False
-
             # For all tasks in this section
             for task in section_tasks:
-
-                # Reset
-                dominant_type = None
 
                 # Check db existance
                 db_check_existance(connection, task)
@@ -1180,284 +1274,35 @@ def autodoist_magic(args, api, connection):
                     run_recurring_lists_logic(
                         args, api, connection, task, child_tasks, child_tasks_all, regen_labels_id)
 
-                # If options turned on, start labelling logic
-                if next_action_label is not None:
-                    # Skip processing a task if it has already been checked or is a header
-                    if task.is_completed:
-                        continue
-
-                    # Remove clean all task and subtask data
-                    if task.content.startswith('*') or disable_section_labelling:
-                        remove_label(task, next_action_label,
-                                     overview_task_ids, overview_task_labels)
-                        db_update_value(connection, task, 'task_type', None)
-                        db_update_value(connection, task, 'parent_type', None)
-
-                        task_ids = find_and_clean_all_children(
-                            [], task, section_tasks)
-                        child_tasks_all = list(
-                            filter(lambda x: x.id in task_ids, section_tasks))
-
-                        for child_task in child_tasks_all:
-                            remove_label(child_task, next_action_label,
-                                         overview_task_ids, overview_task_labels)
-                            db_update_value(
-                                connection, child_task, 'task_type', None)
-                            db_update_value(
-                                connection, child_task, 'parent_type', None)
-
-                        continue
-
-                    # Check task type
-                    task_type, task_type_changed = get_task_type(
-                        args, connection, task, section, project)
-
-                    # If task type has changed, clean all of its children for good measure
-                    if next_action_label is not None:
-                        if task_type_changed == 1:
-
-                            # Find all children under this task
-                            task_ids = find_and_clean_all_children(
-                                [], task, section_tasks)
-                            child_tasks_all = list(
-                                filter(lambda x: x.id in task_ids, section_tasks))
-
-                            for child_task in child_tasks_all:
-                                remove_label(
-                                    child_task, next_action_label, overview_task_ids, overview_task_labels)
-                                db_update_value(
-                                    connection, child_task, 'task_type', None)
-                                db_update_value(
-                                    connection, child_task, 'parent_type', None)
-
-                    # Determine hierarchy types for logic
-                    hierarchy_types = [task_type,
-                                       section_type, project_type]
-                    hierarchy_boolean = [type(x) != type(None)
-                                         for x in hierarchy_types]
-
-                    # If task has no type, but has a label, most likely the order has been changed by user. Remove data.
-                    if not True in hierarchy_boolean and next_action_label in task.labels:
-                        remove_label(task, next_action_label,
-                                     overview_task_ids, overview_task_labels)
-                        db_update_value(connection, task, 'task_type', None)
-                        db_update_value(connection, task, 'parent_type', None)
-
-                    # If it is a parentless task, set task type based on hierarchy
-                    if task.parent_id == 0:
-                        if not True in hierarchy_boolean:
-                            # Parentless task has no type, so skip any children.
-                            continue
-                        else:
-                            if hierarchy_boolean[0]:
-                                # Inherit task type
-                                dominant_type = task_type
-                            elif hierarchy_boolean[1]:
-                                # Inherit section type
-                                dominant_type = section_type
-                            elif hierarchy_boolean[2]:
-                                # Inherit project type
-                                dominant_type = project_type
-
-                            # TODO: optimise below code
-                            # If indicated on project level
-                            if dominant_type[0] == 's':
-                                if not first_found[0]:
-
-                                    if dominant_type[1] == 's':
-                                        if not first_found[1]:
-                                            add_label(
-                                                task, next_action_label, overview_task_ids, overview_task_labels)
-
-                                        elif next_action_label in task.labels:
-                                            # Probably the task has been manually moved, so if it has a label, let's remove it.
-                                            remove_label(
-                                                task, next_action_label, overview_task_ids, overview_task_labels)
-
-                                    elif dominant_type[1] == 'p':
-                                        add_label(
-                                            task, next_action_label, overview_task_ids, overview_task_labels)
-
-                            elif dominant_type[0] == 'p':
-
-                                if dominant_type[1] == 's':
-                                    if not first_found[1]:
-                                        add_label(
-                                            task, next_action_label, overview_task_ids, overview_task_labels)
-
-                                    elif next_action_label in task.labels:
-                                        # Probably the task has been manually moved, so if it has a label, let's remove it.
-                                        remove_label(
-                                            task, next_action_label, overview_task_ids, overview_task_labels)
-
-                                elif dominant_type[1] == 'p':
-                                    add_label(task, next_action_label,
-                                              overview_task_ids, overview_task_labels)
-
-                            # If indicated on section level
-                            if dominant_type[0] == 'x' and dominant_type[1] == 's':
-                                if not first_found[1]:
-                                    add_label(
-                                        task, next_action_label, overview_task_ids, overview_task_labels)
-
-                                elif next_action_label in task.labels:
-                                    # Probably the task has been manually moved, so if it has a label, let's remove it.
-                                    remove_label(
-                                        task, next_action_label, overview_task_ids, overview_task_labels)
-
-                            elif dominant_type[0] == 'x' and dominant_type[1] == 'p':
-                                add_label(task, next_action_label,
-                                          overview_task_ids, overview_task_labels)
-
-                            # If indicated on parentless task level
-                            if dominant_type[1] == 'x' and dominant_type[2] == 's':
-                                if not first_found[1]:
-                                    add_label(
-                                        task, next_action_label, overview_task_ids, overview_task_labels)
-
-                                elif next_action_label in task.labels:
-                                    # Probably the task has been manually moved, so if it has a label, let's remove it.
-                                    remove_label(
-                                        task, next_action_label, overview_task_ids, overview_task_labels)
-
-                            elif dominant_type[1] == 'x' and dominant_type[2] == 'p':
-                                add_label(task, next_action_label,
-                                          overview_task_ids, overview_task_labels)
-
-                    # If a parentless or sub-task which has children
-                    if len(child_tasks) > 0:
-
-                        # If it is a sub-task with no own type, inherit the parent task type instead
-                        if task.parent_id != 0 and task_type == None:
-                            dominant_type = db_read_value(
-                                connection, task, 'parent_type')[0][0]
-
-                        # If it is a sub-task with no dominant type (e.g. lower level child with new task_type), use the task type
-                        if task.parent_id != 0 and dominant_type == None:
-                            dominant_type = task_type
-
-                        if dominant_type is None:
-                            # Task with parent that has been headered, skip.
-                            continue
-                        else:
-                            # Only last character is relevant for subtasks
-                            dominant_type = dominant_type[-1]
-
-                        # Process sequential tagged tasks
-                        if dominant_type == 's':
-
-                            for child_task in child_tasks:
-
-                                # Ignore headered children
-                                if child_task.content.startswith('*'):
-                                    continue
-
-                                # Clean up for good measure.
-                                remove_label(
-                                    child_task, next_action_label, overview_task_ids, overview_task_labels)
-
-                                # Pass task_type down to the children
-                                db_update_value(
-                                    connection, child_task, 'parent_type', dominant_type)
-
-                                # Pass label down to the first child
-                                if not child_task.is_completed and next_action_label in task.labels:
-                                    add_label(
-                                        child_task, next_action_label, overview_task_ids, overview_task_labels)
-                                    remove_label(
-                                        task, next_action_label, overview_task_ids, overview_task_labels)
-
-                        # Process parallel tagged tasks or untagged parents
-                        elif dominant_type == 'p' and next_action_label in task.labels:
-                            remove_label(
-                                task, next_action_label, overview_task_ids, overview_task_labels)
-
-                            for child_task in child_tasks:
-
-                                # Ignore headered children
-                                if child_task.content.startswith('*'):
-                                    continue
-
-                                db_update_value(
-                                    connection, child_task, 'parent_type', dominant_type)
-
-                                if not child_task.is_completed:
-                                    add_label(
-                                        child_task, next_action_label, overview_task_ids, overview_task_labels)
-
-                    # Remove labels based on start / due dates
-
-                    # If task is too far in the future, remove the next_action tag and skip
-                    if is_hidden_future_task(task, args.hide_future):
-                        remove_label(
-                            task, next_action_label, overview_task_ids, overview_task_labels)
-
-                    # If start-date has not passed yet, remove label
-                    try:
-                        f1 = re.search(
-                            r'start=(\d{2}[-]\d{2}[-]\d{4})', task.content)
-                        if f1:
-                            start_date = f1.groups()[0]
-                            start_date = datetime.strptime(
-                                start_date, args.dateformat)
-                            future_diff = (
-                                datetime.today()-start_date).days
-                            # If start-date hasen't passed, remove all labels
-                            if future_diff < 0:
-                                remove_label(
-                                    task, next_action_label, overview_task_ids, overview_task_labels)
-                                [remove_label(child_task, next_action_label, overview_task_ids,
-                                              overview_task_labels) for child_task in child_tasks]
-
-                    except:
-                        logging.warning(
-                            'Wrong start-date format for task: "%s". Please use "start=<DD-MM-YYYY>"', task.content)
-                        continue
-
-                    # Recurring task friendly - remove label with relative change from due date
-                    if task.due is not None:
-                        try:
-                            f2 = re.search(
-                                r'start=due-(\d+)([dw])', task.content)
-
-                            if f2:
-                                offset = f2.groups()[0]
-
-                                if f2.groups()[1] == 'd':
-                                    td = timedelta(days=int(offset))
-                                elif f2.groups()[1] == 'w':
-                                    td = timedelta(weeks=int(offset))
-
-                                due_date = normalise_due_date(task.due)
-                                if due_date is None:
-                                    raise ValueError(
-                                        f"Could not parse due date for task: {task.content}")
-
-                                start_date = due_date - td
-
-                                # If we're not in the offset from the due date yet, remove all labels
-                                future_diff = (date.today()-start_date).days
-
-                                if future_diff < 0:
-                                    remove_label(
-                                        task, next_action_label, overview_task_ids, overview_task_labels)
-                                    [remove_label(child_task, next_action_label, overview_task_ids,
-                                                  overview_task_labels) for child_task in child_tasks]
-                                    continue
-
-                        except:
-                            logging.warning(
-                                'Wrong start-date format for task: %s. Please use "start=due-<NUM><d or w>"', task.content)
-                            continue
-
-                # Mark first found task in section
-                # TODO: is this always true? What about starred tasks?
-                if next_action_label is not None and first_found[1] == False:
-                    first_found[1] = True
-
-            # Mark first found section with tasks in project (to account for None section)
-            if next_action_label is not None and first_found[0] == False and section_tasks:
-                first_found[0] = True
+    if next_action_label is not None:
+        tasks_by_id = {task.id: task for task in all_tasks}
+        sections_by_id = {section.id: section for section in all_sections}
+        projects_by_id = {project.id: project for project in all_projects}
+        workspace = build_workspace_snapshot(all_projects, all_sections, all_tasks)
+        metadata = build_autodoist_metadata_snapshot(
+            connection,
+            all_projects,
+            all_sections,
+            all_tasks,
+        )
+        planning_result = plan_next_action_labels(
+            workspace,
+            build_planner_config(args),
+            metadata,
+        )
+        apply_planner_metadata_commands(
+            connection,
+            tasks_by_id,
+            sections_by_id,
+            projects_by_id,
+            planning_result.metadata_commands,
+        )
+        apply_planner_label_changes(
+            tasks_by_id,
+            planning_result.label_changes,
+            overview_task_ids,
+            overview_task_labels,
+        )
 
     # Return all ids and corresponding labels that need to be modified
     return overview_task_ids, overview_task_labels, num_updates

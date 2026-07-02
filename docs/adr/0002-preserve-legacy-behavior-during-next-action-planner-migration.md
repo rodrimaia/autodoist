@@ -1,0 +1,5 @@
+# Preserve legacy behavior during next-action planner migration
+
+The next-action label planner migration will preserve existing user-visible behavior for legacy Autodoist configurations, even when current behavior is awkward or internally encoded through positional suffix strings. Product behavior changes, such as changing suffix semantics or fixing legacy option quirks, must happen in separate issues with explicit tests; planner refactors should use compatibility tests to keep the migration transparent for users.
+
+For sync-loop integration, `autodoist_magic` remains the orchestrator that reads Todoist state, runs non-planner maintenance such as headering and regeneration, calls the next-action label planner through plain snapshots, and applies planner outputs through the existing Todoist and metadata persistence helpers. The planner must stay isolated from Todoist SDK objects and SQLite; migrated next-action branches should be removed once their behavior is represented by planner inputs, planner outputs, and compatibility tests, instead of keeping a second complete planner beside the new one.
