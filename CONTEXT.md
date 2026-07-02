@@ -23,3 +23,19 @@ _Avoid_: startup label, checked label
 **Sync loop**:
 The repeated work cycle that reads Todoist state, computes task changes, writes updates, reports status, and sleeps before the next cycle.
 _Avoid_: polling loop, main loop
+
+**Next-action label planner**:
+The part of Autodoist that decides which tasks should gain or lose the next-action label during a sync loop.
+_Avoid_: labeling service, label engine, sync logic
+
+**Transparent planner migration**:
+The requirement that next-action label planner refactors preserve existing user-visible behavior for legacy Autodoist configurations.
+_Avoid_: breaking cleanup, behavioral rewrite, v3 behavior
+
+**Label strategy**:
+The sequential or parallel rule that tells Autodoist how to choose actionable tasks at a project, section, task, or child-task level.
+_Avoid_: suffix code, mode string, type code
+
+**Autodoist metadata**:
+Persisted facts from previous sync loops that Autodoist uses to detect label strategy changes and continue next-action label propagation correctly.
+_Avoid_: SQLite data, task_type columns, internal cache
