@@ -933,6 +933,69 @@ class TestActionableDatePlanner:
             LabelChange(task_id='child', labels=()),
         )
 
+    @pytest.mark.parametrize(
+        ('marker', 'due_date'),
+        (
+            ('start=due-0w', date(2026, 7, 3)),
+            ('start=due-1w', date(2026, 7, 10)),
+        ),
+    )
+    def test_weekly_due_relative_start_date_removes_descendant_labels_until_start(
+        self,
+        marker,
+        due_date,
+    ):
+        workspace = self._workspace((
+            self._task(
+                'parent',
+                content=f'Parent {marker}',
+                order=1,
+                due_date=due_date,
+            ),
+            self._task('child', parent_id='parent', order=1),
+            self._task(
+                'grandchild',
+                parent_id='child',
+                labels=(self.LABEL,),
+                order=1,
+            ),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='grandchild', labels=()),
+        )
+
+    @pytest.mark.parametrize(
+        ('marker', 'due_date'),
+        (
+            ('start=due-0w', TODAY),
+            ('start=due-1w', date(2026, 7, 9)),
+        ),
+    )
+    def test_weekly_due_relative_start_date_allows_descendant_labels_on_start(
+        self,
+        marker,
+        due_date,
+    ):
+        workspace = self._workspace((
+            self._task(
+                'parent',
+                content=f'Parent {marker}',
+                order=1,
+                due_date=due_date,
+            ),
+            self._task('child', parent_id='parent', order=1),
+            self._task('grandchild', parent_id='child', order=1),
+        ))
+
+        result = self._plan(workspace)
+
+        assert result.label_changes == (
+            LabelChange(task_id='grandchild', labels=(self.LABEL,)),
+        )
+
     def test_absolute_start_date_removes_child_labels_before_hide_future(self):
         workspace = self._workspace((
             self._task(

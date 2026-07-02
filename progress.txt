@@ -1,3 +1,26 @@
+2026-07-02 - Issue #12: Cover weekly relative actionable date markers
+
+Changed:
+- Added actionable-date planner regression coverage for weekly relative markers on parent tasks.
+- Covered `start=due-0w` and `start=due-1w` before their marker dates, verifying stale `next_action` labels are removed from a grandchild descendant.
+- Covered both weekly markers once their marker dates are reached, verifying descendant next-action labelling is allowed.
+
+Verification:
+- `uv run pytest test_autodoist.py -k 'ActionableDatePlanner' -q` -> 13 passed, 107 deselected.
+- `uv run pytest test_autodoist.py -q` -> 120 passed.
+- `uv run pytest -q` -> 127 passed.
+
+Decisions:
+- Treated this as a regression coverage task because the planner already supports weekly relative markers and recursive descendant cleanup.
+- Used parent -> child -> grandchild fixtures so the tests would catch cleanup that only handled direct children.
+- Review pass found no standards or spec issues; sub-agent review was skipped because the available delegation tool requires explicit user permission.
+
+Blockers:
+- None.
+
+Next recommended task:
+- Issue #13: Cover nested actionable date marker cleanup.
+
 2026-07-02 - Issue #11: Cover absolute actionable date markers before hide-future filtering
 
 Changed:
