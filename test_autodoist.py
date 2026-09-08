@@ -40,6 +40,7 @@ from next_action_planner import (
     label_strategy_to_legacy_type,
     plan_next_action_labels,
     plan_parentless_next_action_labels,
+    plan_project_label_cleanup,
     parse_label_strategy,
 )
 
@@ -118,11 +119,14 @@ sys.modules["todoist_api_python.models"] = _models
 sys.modules["todoist_api_python.api"] = _api_mod
 
 from autodoist import (
+    ProjectSelectorError,
+    build_argument_parser,
     check_name, add_label, remove_label,
     get_type, get_project_type, get_section_type, get_task_type,
     db_check_existance, db_read_value, db_update_value,
     execute_query, execute_read_query, get_labels_with_startup_retry,
     initialise_api, verify_label_existance, configure_logging,
+    resolve_project_selectors,
 )
 
 
@@ -337,6 +341,7 @@ class TestStartupVerification:
             label=self.LABEL,
             regeneration=None,
             end=None,
+            remove_all_labels_from_project=[],
         )
         api = MagicMock()
 
@@ -346,6 +351,23 @@ class TestStartupVerification:
 
         assert result is api
         verify_label.assert_called_once_with(api, self.LABEL, 1)
+
+    def test_initialise_api_accepts_project_cleanup_as_standalone_mode(self):
+        args = argparse.Namespace(
+            api_key="fake",
+            label=None,
+            regeneration=None,
+            end=None,
+            remove_all_labels_from_project=["Someday"],
+        )
+        api = MagicMock()
+
+        with patch("autodoist.TodoistAPI", return_value=api), \
+                patch("autodoist.verify_label_existance") as verify_label:
+            result = initialise_api(args)
+
+        assert result is api
+        verify_label.assert_not_called()
 
     def test_label_creation_errors_are_not_retried(self):
         api = MagicMock()
@@ -496,6 +518,81 @@ class TestPlannerSnapshots:
         config = PlannerConfig(next_action_label='next_action')
 
         assert config.next_action_label == 'next_action'
+
+
+class TestProjectLabelCleanup:
+    def _task(self, task_id, project_id='p1', **overrides):
+        values = dict(
+            content='Task',
+            section_id=None,
+            parent_id=None,
+            labels=('manual',),
+            order=1,
+        )
+        values.update(overrides)
+        return TaskSnapshot(
+            id=task_id,
+            project_id=project_id,
+            **values,
+        )
+
+    def test_resolves_id_before_same_value_project_name(self):
+        projects = (
+            FakeProject(id='123', name='Work'),
+            FakeProject(id='456', name='123'),
+        )
+
+        assert resolve_project_selectors(projects, ['123']) == frozenset({'123'})
+
+    def test_resolves_exact_name_and_deduplicates_targets(self):
+        projects = (FakeProject(id='p1', name='Someday'),)
+
+        result = resolve_project_selectors(projects, ['Someday', 'p1'])
+
+        assert result == frozenset({'p1'})
+
+    @pytest.mark.parametrize('selector', ['someday', 'Missing'])
+    def test_rejects_missing_or_wrong_case_name(self, selector):
+        projects = (FakeProject(id='p1', name='Someday'),)
+
+        with pytest.raises(ProjectSelectorError, match='did not match'):
+            resolve_project_selectors(projects, [selector])
+
+    def test_rejects_ambiguous_project_name(self):
+        projects = (
+            FakeProject(id='p1', name='Someday'),
+            FakeProject(id='p2', name='Someday'),
+        )
+
+        with pytest.raises(ProjectSelectorError, match='use a project ID'):
+            resolve_project_selectors(projects, ['Someday'])
+
+    def test_plans_cleanup_for_all_active_task_shapes_in_direct_project(self):
+        tasks = (
+            self._task('root'),
+            self._task('child', parent_id='root', labels=('manual', 'next_action')),
+            self._task('header', content='* Header'),
+            self._task('completed', is_completed=True),
+            self._task('empty', labels=()),
+            self._task('other', project_id='p2'),
+        )
+        workspace = WorkspaceSnapshot(tasks=tasks)
+
+        result = plan_project_label_cleanup(workspace, {'p1'})
+
+        assert result.label_changes == (
+            LabelChange(task_id='root', labels=()),
+            LabelChange(task_id='child', labels=()),
+            LabelChange(task_id='header', labels=()),
+        )
+
+    def test_cli_option_is_repeatable(self):
+        args = build_argument_parser().parse_args([
+            '--remove_all_labels_from_project', 'Someday',
+            '--remove_all_labels_from_project', '12345',
+        ])
+
+        assert args.remove_all_labels_from_project == ['Someday', '12345']
 
 
 # ---------------------------------------------------------------------------
@@ -1600,6 +1697,7 @@ class TestIntegration:
             inbox=None,
             all_projects=False,
             ignore_suffix=False,
+            remove_all_labels_from_project=[],
             regeneration=None,
             regen_label_names=None,
             end=None,
@@ -1627,6 +1725,79 @@ class TestIntegration:
             return result, tasks
         finally:
             conn.close()
+
+    def test_project_cleanup_runs_without_next_action_labeling(self):
+        project = FakeProject(id="p1", name="Someday")
+        tasks = [
+            make_task("t1", project_id="p1", labels=["manual", self.LABEL]),
+            make_task("t2", project_id="p1", labels=[]),
+        ]
+
+        (ids, labels, _), _ = self._run(
+            [project],
+            [],
+            tasks,
+            label=None,
+            remove_all_labels_from_project=["Someday"],
+        )
+
+        assert tasks[0].labels == []
+        assert tasks[1].labels == []
+        assert ids == {"t1": 1}
+        assert labels == {"t1": []}
+
+    def test_project_cleanup_wins_over_next_action_planning(self):
+        project = FakeProject(id="p1", name="Someday -")
+        task = make_task("t1", project_id="p1", labels=[])
+
+        (ids, labels, _), _ = self._run(
+            [project],
+            [],
+            [task],
+            remove_all_labels_from_project=["p1"],
+        )
+
+        assert task.labels == []
+        assert ids == {"t1": 1}
+        assert labels == {"t1": []}
+
+    def test_project_cleanup_can_target_inbox(self):
+        project = FakeProject(
+            id="inbox-id",
+            name="Inbox",
+            is_inbox_project=True,
+        )
+        task = make_task("t1", project_id="inbox-id", labels=["manual"])
+
+        (ids, labels, _), _ = self._run(
+            [project],
+            [],
+            [task],
+            label=None,
+            remove_all_labels_from_project=["Inbox"],
+        )
+
+        assert task.labels == []
+        assert ids == {"t1": 1}
+        assert labels == {"t1": []}
+
+    def test_invalid_project_cleanup_selector_fails_before_writes(self):
+        project = FakeProject(id="p1", name="Someday")
+        task = make_task("t1", content="** Header", labels=["manual"])
+        api = self._make_api([project], [], [task])
+        args = self._make_args(
+            remove_all_labels_from_project=["Someday", "Missing"],
+        )
+        conn = create_test_db()
+        try:
+            from autodoist import autodoist_magic
+
+            with pytest.raises(ProjectSelectorError, match="did not match"):
+                autodoist_magic(args, api, conn)
+        finally:
+            conn.close()
+
+        api.update_task.assert_not_called()
 
     def test_project_single_dash_sequential(self):
         """Project with '-' suffix: only first parentless task gets label."""

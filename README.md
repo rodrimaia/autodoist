@@ -4,6 +4,7 @@ This is a fork of [Hoffelhas/autodoist](https://github.com/Hoffelhas/autodoist) 
 
 - **`--all_projects`**: Process all projects regardless of whether they have a suffix tag. Useful if you want next-action labels on everything by default.
 - **`--ignore_suffix`**: When used with `--all_projects`, excludes projects ending with `_ignore` from processing.
+- **`--remove_all_labels_from_project <PROJECT>`**: Continuously remove every label from active tasks in selected projects.
 - **`--status_url <URL>`**: Call an HTTP endpoint after each sync loop for process monitoring (e.g. Uptime Kuma, Healthchecks.io).
 - **REST API migration**: Replaced the deprecated Sync API with direct REST API calls through the official `todoist-api-python` SDK. Fixes label assignment bugs related to batch command chunking.
 - **Test suite**: Comprehensive tests covering sequential/parallel suffix logic and task labeling behavior.
@@ -13,7 +14,7 @@ This is a fork of [Hoffelhas/autodoist](https://github.com/Hoffelhas/autodoist) 
 
 *Note: v2.0 is a major overhaul of Autodoist, so please be sure to view the README in order to get up to speed with the latest changes. Thanks to everyone for helping out and supporting this project!*
 
-This program adds four major functionalities to Todoist to help automate your workflow:
+This program adds five major functionalities to Todoist to help automate your workflow:
 
 1) Assign automatic `@next_action` labels for a more GTD-like workflow
    - Flexible options to label tasks sequentially or in parallel
@@ -21,6 +22,7 @@ This program adds four major functionalities to Todoist to help automate your wo
 2) [Temporary disabled] Enable regeneration of sub-tasks in lists with a recurring date. Multiple modes possible.
 3) Postpone the end-of-day time to after midnight to finish your daily recurring tasks
 4) Make multiple tasks (un)checkable at the same time
+5) Continuously remove all labels from active tasks in selected projects
 
 If this tool helped you out, I would really appreciate your support by providing me with some coffee!
 
@@ -194,6 +196,25 @@ If you want to apply labels to all projects, regardless of whether they have a s
 If you want to exclude projects with suffix "_ignore" when using --all_projects:
 
     uv run python autodoist.py --all_projects --ignore_suffix
+
+To continuously remove every label from all active tasks in a project, pass its
+exact, case-sensitive name or project ID. The option is independent of
+`--label` and can be repeated for multiple projects:
+
+    uv run python autodoist.py --remove_all_labels_from_project "Someday"
+    uv run python autodoist.py --remove_all_labels_from_project "Someday" --remove_all_labels_from_project 123456789
+
+Project IDs take precedence over names when a value could match both. If a name
+matches multiple projects, use the project ID instead. A missing or ambiguous
+project aborts the sync before changes are written. Only tasks directly in the
+selected project are affected; nested projects must be selected separately.
+This includes active root tasks, sub-tasks, and header tasks, as well as tasks in
+the Inbox when it is selected. Completed tasks are not changed.
+
+This is a destructive, continuously enforced option: labels added later or on
+tasks moved into the project are removed on the next sync. Combine it with
+`--onetime` for a one-off cleanup. When used with next-action labelling, project
+cleanup wins and the selected tasks finish the sync with no labels.
 
 In addition, if you experience issues with syncing you can increase the api syncing time (default 5 seconds):
     
