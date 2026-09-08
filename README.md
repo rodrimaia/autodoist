@@ -1,8 +1,6 @@
 # Autodoist
 
-[![CI](https://github.com/rodrimaia/autodoist/actions/workflows/ci.yaml/badge.svg)](https://github.com/rodrimaia/autodoist/actions/workflows/ci.yaml)
-![Python](https://img.shields.io/badge/python-%3E%3D3.11-blue)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![CI](https://github.com/rodrimaia/autodoist/actions/workflows/ci.yaml/badge.svg)](https://github.com/rodrimaia/autodoist/actions/workflows/ci.yaml) ![Python](https://img.shields.io/badge/python-%3E%3D3.11-blue) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/C3Y026MKBX)
 
 Autodoist is a long-running [Todoist](https://todoist.com/) automation service. It keeps a trustworthy `next_action` label up to date for GTD-style workflows and can also maintain task headers, shift the effective end of day, remove labels from selected projects, and report its health to a monitoring service.
 
@@ -363,6 +361,8 @@ Autodoist intentionally preserves legacy user-visible behavior while its interna
 ## Support ongoing maintenance
 
 If Autodoist saves you time, you can support continued maintenance through [GitHub Sponsors](https://github.com/sponsors/rodrimaia) or leave a one-time tip on [Ko-fi](https://ko-fi.com/rodrimaia).
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/C3Y026MKBX)
 
 ## License
 
