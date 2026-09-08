@@ -343,11 +343,13 @@ akramer/NextAction (2014)
 
 The Git history retains work from all of these eras. See the [contributors graph](https://github.com/rodrimaia/autodoist/graphs/contributors) for the people whose code and documentation made the project possible.
 
-> I maintain this fork because Autodoist remains genuinely useful and deserves to keep working as Todoist changes. My goal is to carry the work of its previous maintainers forward: preserve the workflows people depend on, modernize the fragile parts, and leave the project healthier for whoever carries it next. — Rodrigo Maia
+> Autodoist is genuinely useful to me, so I keep it maintained. It's lovely to know that other people find it useful too—if it could help you more, please let me know. — Rodrigo Maia
 
 ## Contributing
 
-Bug reports, focused fixes, tests, and documentation improvements are welcome. Open an [issue](https://github.com/rodrimaia/autodoist/issues) before a large behavior change so the intended compatibility impact is clear.
+Feature requests are especially welcome. If an automation or improvement would make Autodoist more useful in your workflow, please [open an issue](https://github.com/rodrimaia/autodoist/issues) and tell us about it—even if you are not sure how it should be implemented. Bug reports, focused fixes, tests, and documentation improvements are welcome too.
+
+For large behavior changes, open an issue first so the intended compatibility impact is clear.
 
 Set up the development environment and run the tests with:
 
