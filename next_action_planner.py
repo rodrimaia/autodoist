@@ -411,6 +411,20 @@ def plan_next_action_labels(workspace, config, metadata):
     )
 
 
+def plan_project_label_cleanup(workspace, project_ids):
+    """Remove every label from active tasks directly in selected projects."""
+    selected_project_ids = frozenset(project_ids)
+    return PlanningResult(
+        label_changes=tuple(
+            LabelChange(task_id=task.id, labels=())
+            for task in workspace.tasks
+            if task.project_id in selected_project_ids
+            and not task.is_completed
+            and task.labels
+        ),
+    )
+
+
 def _sections_by_project(sections):
     result = {}
     for section in sections:

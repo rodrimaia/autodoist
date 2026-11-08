@@ -31,6 +31,7 @@ from next_action_planner import (
     label_strategy_to_legacy_type,
     legacy_type_to_label_strategy,
     plan_next_action_labels,
+    plan_project_label_cleanup,
     parse_label_strategy,
 )
 
@@ -38,6 +39,10 @@ STARTUP_RETRY_WINDOW_SECONDS = 600
 STARTUP_RETRY_INITIAL_DELAY_SECONDS = 5
 STARTUP_RETRY_MAX_DELAY_SECONDS = 60
 LOG_FORMAT = "%(asctime)s %(levelname)s %(message)s"
+
+
+class ProjectSelectorError(ValueError):
+    """A project cleanup selector is missing or ambiguous."""
 
 # Connect to SQLite database
 
@@ -467,14 +472,16 @@ def initialise_api(args):
     # Show which modes are enabled:
     modes = []
     m_num = 0
-    for x in [args.label, args.regeneration, args.end, getattr(args, 'reschedule_overdue', False)]:
+    cleanup_projects = getattr(args, 'remove_all_labels_from_project', ())
+    for x in [args.label, args.regeneration, args.end, cleanup_projects,
+              getattr(args, 'reschedule_overdue', False)]:
         if x:
             modes.append('Enabled')
             m_num += 1
         else:
             modes.append('Disabled')
 
-    logging.info("You are running with the following functionalities:\n\n   Next action labelling mode: {}\n   Regenerate sub-tasks mode: {}\n   Shifted end-of-day mode: {}\n   Reschedule overdue mode: {}\n".format(*modes))
+    logging.info("You are running with the following functionalities:\n\n   Next action labelling mode: {}\n   Regenerate sub-tasks mode: {}\n   Shifted end-of-day mode: {}\n   Project label cleanup mode: {}\n   Reschedule overdue mode: {}\n".format(*modes))
 
     if m_num == 0:
         logging.info(
@@ -643,6 +650,34 @@ def build_workspace_snapshot(projects, sections, tasks):
             for task in tasks
         ),
     )
+
+
+def resolve_project_selectors(projects, selectors):
+    """Resolve exact project IDs first, then exact case-sensitive names."""
+    projects_by_id = {str(project.id): project for project in projects}
+    projects_by_name = {}
+    for project in projects:
+        projects_by_name.setdefault(project.name, []).append(project)
+
+    project_ids = set()
+    for selector in selectors:
+        id_match = projects_by_id.get(selector)
+        if id_match is not None:
+            project_ids.add(id_match.id)
+            continue
+
+        name_matches = projects_by_name.get(selector, ())
+        if not name_matches:
+            raise ProjectSelectorError(
+                f"Project selector {selector!r} did not match an exact project ID or name."
+            )
+        if len(name_matches) > 1:
+            raise ProjectSelectorError(
+                f"Project selector {selector!r} matched multiple project names; use a project ID instead."
+            )
+        project_ids.add(name_matches[0].id)
+
+    return frozenset(project_ids)
 
 
 def build_autodoist_metadata_snapshot(connection, projects, sections, tasks):
@@ -1181,6 +1216,11 @@ def autodoist_magic(args, api, connection, overdue_rescheduler=None):
     except Exception as error:
         logging.error(error)
 
+    cleanup_project_ids = resolve_project_selectors(
+        all_projects,
+        getattr(args, 'remove_all_labels_from_project', ()),
+    )
+
     if overdue_rescheduler is not None:
         num_updates += overdue_rescheduler.reschedule(all_tasks)
 
@@ -1295,8 +1335,9 @@ def autodoist_magic(args, api, connection, overdue_rescheduler=None):
                     run_recurring_lists_logic(
                         args, api, connection, task, child_tasks, child_tasks_all, regen_labels_id)
 
+    tasks_by_id = {task.id: task for task in all_tasks}
+
     if next_action_label is not None:
-        tasks_by_id = {task.id: task for task in all_tasks}
         sections_by_id = {section.id: section for section in all_sections}
         projects_by_id = {project.id: project for project in all_projects}
         workspace = build_workspace_snapshot(all_projects, all_sections, all_tasks)
@@ -1330,15 +1371,25 @@ def autodoist_magic(args, api, connection, overdue_rescheduler=None):
             planning_result.description_changes,
         )
 
+    if cleanup_project_ids:
+        cleanup_result = plan_project_label_cleanup(
+            build_workspace_snapshot(all_projects, all_sections, all_tasks),
+            cleanup_project_ids,
+        )
+        apply_planner_label_changes(
+            tasks_by_id,
+            cleanup_result.label_changes,
+            overview_task_ids,
+            overview_task_labels,
+        )
+
     # Return all ids and corresponding labels that need to be modified
     return overview_task_ids, overview_task_labels, num_updates
 
 # Main
 
 
-def main():
-
-    # Main process functions.
+def build_argument_parser():
     parser = argparse.ArgumentParser(
         formatter_class=make_wide(argparse.HelpFormatter, w=120, h=60))
     parser.add_argument(
@@ -1372,8 +1423,23 @@ def main():
                         action='store_true')
     parser.add_argument('--ignore_suffix', help='exclude projects with suffix "_ignore" when all_projects is enabled.',
                         action='store_true')
+    parser.add_argument(
+        '--remove_all_labels_from_project',
+        action='append',
+        default=[],
+        metavar='PROJECT',
+        help='remove every label from active tasks in an exact project ID or name; repeat for multiple projects.',
+    )
     parser.add_argument('--status_url', help='URL to call after each sync loop iteration for monitoring.',
                         type=str)
+
+    return parser
+
+
+def main():
+
+    # Main process functions.
+    parser = build_argument_parser()
 
     args = parser.parse_args()
 
@@ -1405,11 +1471,15 @@ def main():
         start_time = time.time()
 
         # Evaluate projects, sections, and tasks
-        overview_task_ids, overview_task_labels, num_changes = autodoist_magic(
-            args, api, connection, overdue_rescheduler)
+        try:
+            overview_task_ids, overview_task_labels, num_changes = autodoist_magic(
+                args, api, connection, overdue_rescheduler)
+        except ProjectSelectorError as error:
+            logging.error('%s', error)
+            sys.exit(2)
 
-        # Commit next action label changes via REST API
-        if args.label is not None:
+        # Commit planned label changes via REST API
+        if args.label is not None or args.remove_all_labels_from_project:
             num_changes += apply_label_updates(api, overview_task_ids,
                                                overview_task_labels)
 
