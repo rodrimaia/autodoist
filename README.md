@@ -13,6 +13,7 @@ This repository is an actively maintained fork of [Hoffelhas/autodoist](https://
 | Automatic next-action labels | Active | `--label next_action` |
 | Sequential and parallel task selection | Active | Add `-` or `=` strategies to Todoist names |
 | Actionable dates and future-task filtering | Active | Add a `start=...` marker or use `--hide_future` |
+| Overdue rollover with recurrence safeguards | Active | `--reschedule-overdue` |
 | Shifted end of day | Active | `--end HOUR` |
 | Bulk header/unheader commands | Active | Prefix a project, section, or task with `** ` or `-* ` during an enabled run |
 | Project-wide label cleanup | Active | `--remove_all_labels_from_project PROJECT` |
@@ -110,7 +111,7 @@ Remove `--onetime` to enter the continuous sync loop. You may also pass the toke
 
 ## Configuration reference
 
-At least one functional mode—next-action labeling, shifted end of day, or project label cleanup—must be enabled.
+At least one functional mode—next-action labeling, shifted end of day, overdue rollover, or project label cleanup—must be enabled.
 
 | Option | Purpose | Default |
 | --- | --- | --- |
@@ -121,6 +122,7 @@ At least one functional mode—next-action labeling, shifted end of day, or proj
 | `-p`, `--p_suffix TEXT` | Parallel label-strategy suffix | `=` |
 | `-s`, `--s_suffix TEXT` | Sequential label-strategy suffix | `-` |
 | `-hf`, `--hide_future DAYS` | Do not label tasks due at least this many days in the future | `0` |
+| `--reschedule-overdue` | Move overdue tasks to today; skip unverified recurring rules | Disabled |
 | `--onetime` | Run one sync and exit | Disabled |
 | `--debug` | Include debug-level events in the JSON logs | Disabled |
 | `--inbox parallel\|sequential` | Select the strategy used for Inbox tasks | Unconfigured |
@@ -254,6 +256,31 @@ If a relative marker is used on a task without a Todoist due date, Autodoist lea
 ![Tasks hidden using the future due-date boundary](https://i.imgur.com/LzSoRUm.png)
 
 ## Other automations
+
+### Overdue rollover
+
+Run `uv run --frozen python autodoist.py --reschedule-overdue --onetime` to roll over once,
+or omit `--onetime` to check every sync cycle. This flag works without labeling enabled.
+It includes Inbox, subtasks, and ignored projects, but excludes tasks assigned to
+someone else. Only dates before the current logical day move; a task due earlier
+today stays as it is. Times and timezones are retained, so a task moved to 9 a.m.
+today can still appear overdue after 9 a.m. Deadlines are not changed.
+
+The logical day uses your Todoist account timezone and respects `--end`:
+with `--end 4`, before 4 a.m. the target date is yesterday. `--end 24`
+keeps yesterday as the logical day throughout the calendar day.
+
+**Recurring schedules:** rollover preserves the full recurrence metadata for
+English rules `every day`, `every Monday` (or any single full weekday name), and
+`every! N days` (including `every! day`). Controlled live tests verified the next
+occurrence after completion for weekly and completion-relative rules.
+
+Other recurring rules, including fixed intervals such as `every 3 days`, translated
+rules, and rules with extra clauses, remain unchanged with a warning. A live test
+showed that Todoist calculated `every 3 days` from completion rather than retaining
+the original cadence. Preserving repeat text alone cannot meet that requirement.
+This safeguard can leave overdue recurring tasks in your account.
+The existing `--end` recurring-task maintenance remains separate from rollover.
 
 ### Shift the end of day
 

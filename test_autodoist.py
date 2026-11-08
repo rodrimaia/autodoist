@@ -352,6 +352,15 @@ class TestStartupVerification:
         assert result is api
         verify_label.assert_called_once_with(api, self.LABEL, 1)
 
+    def test_overdue_rollover_can_be_enabled_without_other_modes(self):
+        args = argparse.Namespace(api_key="fake", label=None, regeneration=None,
+                                  end=None, reschedule_overdue=True)
+        api = MagicMock()
+        with patch("autodoist.TodoistAPI", return_value=api), \
+                patch("autodoist.verify_label_existance") as verify_label:
+            assert initialise_api(args) is api
+        verify_label.assert_not_called()
+
     def test_initialise_api_accepts_project_cleanup_as_standalone_mode(self):
         args = argparse.Namespace(
             api_key="fake",
@@ -1789,15 +1798,17 @@ class TestIntegration:
             remove_all_labels_from_project=["Someday", "Missing"],
         )
         conn = create_test_db()
+        rescheduler = MagicMock()
         try:
             from autodoist import autodoist_magic
 
             with pytest.raises(ProjectSelectorError, match="did not match"):
-                autodoist_magic(args, api, conn)
+                autodoist_magic(args, api, conn, rescheduler)
         finally:
             conn.close()
 
         api.update_task.assert_not_called()
+        rescheduler.reschedule.assert_not_called()
 
     def test_project_single_dash_sequential(self):
         """Project with '-' suffix: only first parentless task gets label."""
@@ -2140,3 +2151,23 @@ class TestSortingOrder:
             x.parent_id if x.parent_id else "", x.order))
 
         assert [t.id for t in sorted_tasks] == ["c1", "c3", "c2"]
+
+
+def test_rollover_receives_inbox_and_ignored_project_tasks_before_label_processing():
+    from autodoist import autodoist_magic
+    tasks = [make_task('inbox-task', project_id='inbox'),
+             make_task('ignored-task', project_id='ignored')]
+    api = MagicMock()
+    api.get_tasks.return_value = [tasks]
+    api.get_projects.return_value = [[]]
+    api.get_sections.return_value = [[]]
+    rescheduler = MagicMock()
+    rescheduler.reschedule.return_value = 2
+    args = argparse.Namespace(label=None, regen_label_names=None)
+    conn = create_test_db()
+    try:
+        _, _, changes = autodoist_magic(args, api, conn, rescheduler)
+    finally:
+        conn.close()
+    rescheduler.reschedule.assert_called_once_with(tasks)
+    assert changes == 2
