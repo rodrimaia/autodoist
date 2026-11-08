@@ -15,6 +15,7 @@ import os
 import re
 import json
 from pythonjsonlogger.json import JsonFormatter
+from overdue_tasks import OverdueRescheduler
 from next_action_planner import (
     AutodoistMetadataSnapshot,
     PlannerConfig,
@@ -466,14 +467,14 @@ def initialise_api(args):
     # Show which modes are enabled:
     modes = []
     m_num = 0
-    for x in [args.label, args.regeneration, args.end]:
+    for x in [args.label, args.regeneration, args.end, getattr(args, 'reschedule_overdue', False)]:
         if x:
             modes.append('Enabled')
             m_num += 1
         else:
             modes.append('Disabled')
 
-    logging.info("You are running with the following functionalities:\n\n   Next action labelling mode: {}\n   Regenerate sub-tasks mode: {}\n   Shifted end-of-day mode: {}\n".format(*modes))
+    logging.info("You are running with the following functionalities:\n\n   Next action labelling mode: {}\n   Regenerate sub-tasks mode: {}\n   Shifted end-of-day mode: {}\n   Reschedule overdue mode: {}\n".format(*modes))
 
     if m_num == 0:
         logging.info(
@@ -1161,7 +1162,7 @@ def find_and_headerify_all_children(api, task, section_tasks, mode):
 # Contains all main autodoist functionalities
 
 
-def autodoist_magic(args, api, connection):
+def autodoist_magic(args, api, connection, overdue_rescheduler=None):
 
     # Preallocate dictionaries and other values
     overview_task_ids = {}
@@ -1179,6 +1180,9 @@ def autodoist_magic(args, api, connection):
 
     except Exception as error:
         logging.error(error)
+
+    if overdue_rescheduler is not None:
+        num_updates += overdue_rescheduler.reschedule(all_tasks)
 
     for project in all_projects:
 
@@ -1357,6 +1361,9 @@ def main():
         '-hf', '--hide_future', help='prevent labelling of future tasks beyond a specified number of days.', default=0, type=int)
     parser.add_argument(
         '--onetime', help='update Todoist once and exit.', action='store_true')
+    parser.add_argument(
+        '--reschedule-overdue', action='store_true',
+        help='move tasks dated before today to today, preserving times; unverified recurring tasks are skipped with a warning.')
     parser.add_argument('--debug', help='enable debugging and store detailed to a log file.',
                         action='store_true')
     parser.add_argument('--inbox', help='the method the Inbox should be processed with.',
@@ -1387,6 +1394,8 @@ def main():
 
     # Initialise api
     api = initialise_api(args)
+    overdue_rescheduler = (OverdueRescheduler(args.api_key, args.end)
+                          if args.reschedule_overdue else None)
 
     # Initialise SQLite database
     connection = initialise_sqlite()
@@ -1397,7 +1406,7 @@ def main():
 
         # Evaluate projects, sections, and tasks
         overview_task_ids, overview_task_labels, num_changes = autodoist_magic(
-            args, api, connection)
+            args, api, connection, overdue_rescheduler)
 
         # Commit next action label changes via REST API
         if args.label is not None:

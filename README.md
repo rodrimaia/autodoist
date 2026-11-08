@@ -5,6 +5,7 @@ This is a fork of [Hoffelhas/autodoist](https://github.com/Hoffelhas/autodoist) 
 - **`--all_projects`**: Process all projects regardless of whether they have a suffix tag. Useful if you want next-action labels on everything by default.
 - **`--ignore_suffix`**: When used with `--all_projects`, excludes projects ending with `_ignore` from processing.
 - **`--status_url <URL>`**: Call an HTTP endpoint after each sync loop for process monitoring (e.g. Uptime Kuma, Healthchecks.io).
+- **`--reschedule-overdue`**: Move overdue tasks to today while preserving their time and timezone. Supports verified recurring rules; uncertain rules are skipped with a warning.
 - **REST API migration**: Replaced the deprecated Sync API with direct REST API calls through the official `todoist-api-python` SDK. Fixes label assignment bugs related to batch command chunking.
 - **Test suite**: Comprehensive tests covering sequential/parallel suffix logic and task labeling behavior.
 - **GitHub Actions**: Workflow to run the test suite on pushes and pull requests, then publish a Docker image to GHCR on `master` pushes.
@@ -223,3 +224,28 @@ To build the docker container, check out the repository and run:
 To run autodoist inside the docker container:
 
     docker run -it autodoist:latest
+
+## Overdue rollover
+
+Run `uv run autodoist.py --reschedule-overdue --onetime` to roll over once,
+or omit `--onetime` to check every sync cycle. This flag works without labeling enabled.
+It includes Inbox, subtasks, and ignored projects, but excludes tasks assigned to
+someone else. Only dates before the current logical day move; a task due earlier
+today stays as it is. Times and timezones are retained, so a task moved to 9 a.m.
+today can still appear overdue after 9 a.m. Deadlines are not changed.
+
+The logical day uses your Todoist account timezone and respects `--end`:
+with `--end 4`, before 4 a.m. the target date is yesterday. `--end 24`
+keeps yesterday as the logical day throughout the calendar day.
+
+**Recurring schedules:** rollover preserves the full recurrence metadata for
+English rules `every day`, `every Monday` (or any single full weekday name), and
+`every! N days` (including `every! day`). Controlled live tests verified the next
+occurrence after completion for weekly and completion-relative rules.
+
+Other recurring rules, including fixed intervals such as `every 3 days`, translated
+rules, and rules with extra clauses, remain unchanged with a warning. A live test
+showed that Todoist calculated `every 3 days` from completion rather than retaining
+the original cadence. Preserving repeat text alone cannot meet that requirement.
+This safeguard can leave overdue recurring tasks in your account.
+The existing `--end` recurring-task maintenance remains separate from rollover.
