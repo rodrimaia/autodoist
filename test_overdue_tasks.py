@@ -48,26 +48,55 @@ def test_moves_all_projects_and_subtasks_and_is_idempotent(server):
     assert all(t.due.date == date(2026, 11, 8) for t in tasks)
 
 
-@pytest.mark.parametrize('rule', ['every 3 days', 'every 2 weeks', 'every month'])
-def test_unverified_recurrence_is_never_written(server, caplog, rule):
+@pytest.mark.parametrize('rule,lang', [
+    ('every 3 days', 'en'), ('every 2 weeks', 'en'), ('every month', 'en'),
+    ('a cada 3 dias', 'pt'), ('toda semana', 'pt'), ('todo mês', 'pt'),
+    ('every day starting 7 Nov 2026', 'en'),
+    ('todo dia começando em 7 de nov de 2026', 'pt'),
+    ('every day until 7 Nov 2026', 'en'),
+    ('todo dia até 7 de nov de 2026', 'pt'),
+    ('a cada! 3 dias até 7 de nov de 2026', 'pt'),
+    ('every day at 9am', 'en'), ('todo dia às 9h', 'pt'),
+    ('a cada! 0 dias', 'pt'), ('every! 0 days', 'en'),
+    ('every day', 'pt'), ('todo dia', 'en'),
+    ('todo dia', 'pt_BR'), ('every day', None), (None, 'pt'),
+])
+def test_unverified_recurrence_is_never_written(server, caplog, rule, lang):
     t = task(recurring=True)
     t.due.string = rule
-    t.due.lang = 'en'
+    t.due.lang = lang
     assert OverdueRescheduler('fake').reschedule([t], NOW) == 0
     assert not server[0]
     assert t.due.date == '2026-11-07'
     assert 'recurrence preservation is not verified' in caplog.text
+    assert f'rule={rule!r}' in caplog.text
+    assert f'lang={lang!r}' in caplog.text
+    assert 'may change the original cadence or recurrence boundaries' in caplog.text
 
 
-@pytest.mark.parametrize('rule', ['every Monday', 'every day', 'every! 3 days'])
-def test_verified_recurrence_retains_complete_metadata(server, rule):
+@pytest.mark.parametrize('rule,lang', [
+    ('every Monday', 'en'), ('every day', 'en'), ('every! 3 days', 'en'),
+    ('todo dia', 'pt'), ('toda segunda-feira', 'pt'), ('toda terça-feira', 'pt'),
+    ('toda quarta-feira', 'pt'), ('toda quinta-feira', 'pt'), ('toda sexta-feira', 'pt'),
+    ('todo sábado', 'pt'), ('todo domingo', 'pt'),
+    ('a cada! dia', 'pt'), ('a cada! 1 dia', 'pt'), ('a cada! 3 dias', 'pt'),
+    ('  TODO DIA  ', 'pt'),
+])
+def test_verified_recurrence_retains_complete_metadata(server, rule, lang):
     t = task(recurring=True)
     t.due.string = rule
-    t.due.lang = 'en'
+    t.due.lang = lang
     assert OverdueRescheduler('fake').reschedule([t], NOW) == 1
     assert server[0][0]['args']['due'] == {
         'date': '2026-11-08', 'timezone': None, 'is_recurring': True,
-        'string': rule, 'lang': 'en'}
+        'string': rule, 'lang': lang}
+
+
+def test_missing_recurrence_metadata_is_reported_as_unverified(server, caplog):
+    t = task(recurring=True)
+    assert OverdueRescheduler('fake').reschedule([t], NOW) == 0
+    assert not server[0]
+    assert 'recurrence preservation is not verified (rule=None, lang=None)' in caplog.text
 
 
 @pytest.mark.parametrize('value', ['2026-11-08', '2026-11-08T09:00:00', '2026-11-09'])

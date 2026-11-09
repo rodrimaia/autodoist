@@ -270,16 +270,25 @@ The logical day uses your Todoist account timezone and respects `--end`:
 with `--end 4`, before 4 a.m. the target date is yesterday. `--end 24`
 keeps yesterday as the logical day throughout the calendar day.
 
-**Recurring schedules:** rollover preserves the full recurrence metadata for
-English rules `every day`, `every Monday` (or any single full weekday name), and
-`every! N days` (including `every! day`). Controlled live tests verified the next
-occurrence after completion for weekly and completion-relative rules.
+**Recurring schedules:** rollover preserves both recurrence metadata and the
+original schedule for these English and Portuguese rules:
 
-Other recurring rules, including fixed intervals such as `every 3 days`, translated
-rules, and rules with extra clauses, remain unchanged with a warning. A live test
-showed that Todoist calculated `every 3 days` from completion rather than retaining
-the original cadence. Preserving repeat text alone cannot meet that requirement.
-This safeguard can leave overdue recurring tasks in your account.
+| Language (`due.lang`) | Supported rules |
+| --- | --- |
+| English (`en`) | `every day`, `every Monday` (or any single full weekday name), `every! N days`, `every! day` |
+| Portuguese (`pt`) | `todo dia`, `toda segunda-feira` (also `terça-feira`, `quarta-feira`, `quinta-feira`, `sexta-feira`), `todo sábado`, `todo domingo`, `a cada! N dias`, `a cada! dia`, `a cada! 1 dia` |
+
+`every` / `a cada` uses the scheduled date; `every!` / `a cada!` uses the completion
+date. Moving a fixed interval such as `every 3 days` or `a cada 3 dias` can change
+its reference date even if the repeat text survives. Controlled live comparisons
+confirmed this loss of cadence, while fixed weekdays and completion-relative day
+rules retained their next occurrence after one or two rollovers.
+
+Other rules and languages remain unchanged with a warning that includes the rule,
+language, and preservation risk. Extra clauses, including start dates, end dates,
+and times in the repeat text, are not supported. This also leaves schedules whose
+end date has already passed intact. Overdue recurring tasks can therefore remain
+in your account. Rollover does not maintain a separate recurrence calendar.
 The existing `--end` recurring-task maintenance remains separate from rollover.
 
 ### Shift the end of day

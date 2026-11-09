@@ -12,12 +12,16 @@ import requests
 
 def verified_recurrence(due):
     """Only rules whose future dates do not depend on the moved occurrence."""
-    if getattr(due, "lang", None) != "en":
-        return False
-    rule = due.string.strip().lower()
-    return re.fullmatch(
-        r"every (?:day|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|"
-        r"every! (?:[1-9][0-9]* )?days?", rule) is not None
+    patterns = {
+        "en": (r"every (?:day|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|"
+               r"every! (?:[1-9][0-9]* )?days?"),
+        "pt": (r"todo dia|toda (?:segunda|terça|quarta|quinta|sexta)-feira|"
+               r"todo (?:sábado|domingo)|a cada! (?:[1-9][0-9]* )?dias?"),
+    }
+    pattern = patterns.get(getattr(due, "lang", None))
+    rule = getattr(due, "string", None)
+    return (pattern is not None and isinstance(rule, str)
+            and re.fullmatch(pattern, rule.strip().lower()) is not None)
 
 
 class OverdueRescheduler:
@@ -66,7 +70,10 @@ class OverdueRescheduler:
                     continue
                 # Fixed intervals can lose their original cadence even when the repeat text survives.
                 if task.due.is_recurring and not verified_recurrence(task.due):
-                    logging.warning("Overdue task %s unchanged: recurrence preservation is not verified.", task.id)
+                    logging.warning(
+                        "Overdue task %s unchanged: recurrence preservation is not verified "
+                        "(rule=%r, lang=%r); moving it may change the original cadence or recurrence boundaries.",
+                        task.id, getattr(task.due, "string", None), getattr(task.due, "lang", None))
                     continue
                 if timed:
                     moved = local_due.replace(year=today.year, month=today.month, day=today.day)
